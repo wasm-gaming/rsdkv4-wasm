@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Build workspace + output (TS build + WASM are built in CI and attached to Releases)
+.tmp/
+dist/
+*.tsbuildinfo
+
+# Game data — never committed. Provided by the host at runtime.
+*.rsdk
+
+# OS / editor
+.DS_Store
+.vscode/

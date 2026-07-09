@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
+  <title>RSDKv4 SDK — demo</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    #picker { position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 12px; z-index: 10; text-align: center;
+      border: 2px dashed transparent; transition: border-color .15s, background .15s; }
+    #picker.hidden { display: none; }
+    #picker.dragover { border-color: #66fcf1; background: rgba(102, 252, 241, 0.08); }
+    .canvas-container { position: absolute; inset: 0; display: flex;
+      align-items: center; justify-content: center; }
+    canvas.emscripten { aspect-ratio: 16/9; display: block; max-width: 100%;
+      max-height: 100%; outline: none; }
+    small { color: #8b8e98; max-width: 32rem; }
+  </style>
+
+  <!-- The demo imports the SDK by its package name; the import map resolves it to
+       the built files sitting next to this HTML in dist/. This mirrors how a real
+       host consumes the package. -->
+  <script type="importmap">
+    {
+      "imports": {
+        "@wasm-gaming/engine-rsdkv4": "./rsdkv4/rsdkv4.sdk.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="picker">
+    <h2>RSDKv4 SDK demo</h2>
+    <p id="status">Loading <code>./Data.rsdk</code>…</p>
+    <input id="file" type="file" accept=".rsdk" hidden />
+    <small>Drop a <code>Data.rsdk</code> next to this page (Sonic 1 or Sonic 2) and
+      it boots automatically. One WASM runs both — the file selects the game.
+      Nothing is uploaded; it stays in the browser.</small>
+  </div>
+  <div class="canvas-container">
+    <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+  </div>
+
+  <script type="module" src="./demo.js"></script>
+</body>
+</html>

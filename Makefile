@@ -1,0 +1,67 @@
+# @wasm-gaming/engine-rsdkv4 — build & preview
+#
+#   make build     Full build → dist/ (TypeScript SDK + WASM)
+#   make preview   Serve dist/ at http://localhost:$(PORT)
+#
+# All build logic lives here (package.json has no scripts). Sub-targets:
+# build-sdk (TS only), build-lib/manifest/demo, build-wasm (Docker/emsdk),
+# typecheck, install, clean.
+
+# Local npm bin, so we can run tsc without a global install. NOTE: we call it as
+# $(BIN)/tsc rather than adding it to PATH — macOS ships GNU Make 3.81, whose
+# direct-exec of simple recipe lines ignores a make-variable PATH (even exported),
+# so `PATH := ...` + bare `tsc` silently fails there. Path-prefixing works on every
+# make version. (node/cp/python3/bash resolve via the system PATH already.)
+BIN := node_modules/.bin
+
+PORT ?= 8080
+
+.PHONY: build build-sdk build-lib build-manifest build-demo build-wasm \
+        preview typecheck i install clean help
+
+i: install
+install: ## Install dev dependencies (typescript)
+	npm install
+
+# Real target: only (re)installs when package.json is newer than node_modules.
+node_modules: package.json
+	npm install
+	@touch node_modules
+
+build: build-sdk build-wasm ## Full build → dist/ (TypeScript + WASM)
+
+build-sdk: build-lib build-manifest build-demo ## TypeScript → dist/ (no WASM)
+
+build-lib: node_modules ## Compile SDK/options/manifest → dist/rsdkv4/
+	$(BIN)/tsc -p tsconfig.json
+
+build-manifest: build-lib ## Serialize typed manifest → dist/manifest.json
+	node scripts/emit-manifest.mjs
+
+build-demo: build-lib ## Compile demo → dist/{demo.js,index.html}; seed settings.ini
+	$(BIN)/tsc -p tsconfig.demo.json
+	cp src/demo/index.html dist/index.html
+	node scripts/seed-settings.mjs
+
+build-wasm: ## WASM via emscripten/emsdk (Docker) → dist/rsdkv4/rsdkv4.{js,wasm}
+	bash scripts/build-docker.sh
+
+typecheck: node_modules ## Type-check without emitting
+	$(BIN)/tsc -p tsconfig.json --noEmit
+	$(BIN)/tsc -p tsconfig.demo.json --noEmit
+
+preview: ## Serve dist/ at http://localhost:$(PORT)
+	@echo "Serving dist/ at http://localhost:$(PORT) (Ctrl+C to stop)"
+	@# Note: plain server sends no COOP/COEP headers, so OPFS is not isolated here
+	@# and the SDK falls back to the in-memory WASMFS backend. That's fine for preview.
+	python3 -m http.server $(PORT) --directory dist
+
+clean: ## Remove build outputs (keeps dist/Data.rsdk and dist/settings.ini)
+# 	rm -rf .tmp
+	@if [ -d dist ]; then find dist -mindepth 1 ! -name Data.rsdk ! -name settings.ini -delete; fi
+
+help: ## List targets
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
+
+.DEFAULT_GOAL := help

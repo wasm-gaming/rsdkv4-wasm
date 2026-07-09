@@ -1,0 +1,38 @@
+{
+  "name": "@wasm-gaming/engine-rsdkv4",
+  "version": "0.1.0",
+  "description": "RSDKv4 (Retro Software Development Kit v4) compiled to WebAssembly, with a JS SDK conforming to the wasm-gaming engine contract. Runs Sonic 1 & Sonic 2 from a single WASM by loading Data.rsdk at runtime.",
+  "type": "module",
+  "main": "./dist/rsdkv4/rsdkv4.sdk.js",
+  "types": "./dist/rsdkv4/rsdkv4.sdk.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/rsdkv4/rsdkv4.sdk.d.ts",
+      "import": "./dist/rsdkv4/rsdkv4.sdk.js"
+    },
+    "./options": {
+      "types": "./dist/rsdkv4/rsdkv4.options.d.ts",
+      "import": "./dist/rsdkv4/rsdkv4.options.js"
+    },
+    "./manifest": "./dist/manifest.json"
+  },
+  "files": [
+    "dist/",
+    "src/"
+  ],
+  "comment:scripts": "Build logic lives in the Makefile, not here (make build / build-sdk / build-wasm / preview).",
+  "scripts": {},
+  "peerDependencies": {
+    "@wasm-gaming/wasm-specs": "*"
+  },
+  "peerDependenciesMeta": {
+    "@wasm-gaming/wasm-specs": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  },
+  "engineContract": "https://github.com/wasm-gaming/wasm-specs",
+  "license": "MIT"
+}
