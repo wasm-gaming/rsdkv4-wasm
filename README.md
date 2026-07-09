@@ -177,7 +177,9 @@ publishes `dist/` to GitHub Pages on pushes to `main` (and manual runs). Since
 prompt — drop a `Data.rsdk` to boot.
 
 - **One-time setup:** repo *Settings → Pages → Build and deployment → Source =
-  GitHub Actions*.
+  GitHub Actions*. The workflow also calls `actions/configure-pages` with
+  `enablement: true`, so first deploy can bootstrap Pages automatically when the
+  repo-level Pages site does not exist yet.
 - **OPFS note:** GitHub Pages can't set COOP/COEP headers, so the page isn't
   cross-origin isolated — OPFS stays off and the SDK uses the in-memory WASMFS
   backend (see the filesystem caveat above).
