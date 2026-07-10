@@ -161,8 +161,8 @@ make build-wasm   # local: runs scripts/build.sh inside emscripten/emsdk (Docker
   `-sWASMFS -sINVOKE_RUN=0 -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=createRSDKv4`
   + `FS`/`callMain`/`ccall` exported, **without** `--preload-file`.
 
-Resolving the contract types needs the sibling `@wasm-gaming/engine-specs` built
-(see `tsconfig.json` `paths`).
+Contract types are resolved from the npm package `@wasm-gaming/engine-specs`
+(installed via this project's devDependencies).
 
 ### dist/ layout
 
