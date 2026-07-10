@@ -18,6 +18,7 @@ import { manifest, load } from '@wasm-gaming/engine-rsdkv4';
 const engine = await load({
   canvas,                       // an <canvas id="canvas">
   assets: { data: dataRsdkBytes /*, settings: iniBytes */ },
+  storageNamespace: 'sonic1',   // carpeta por juego bajo /data (OPFS/WASMFS)
   onEvent: (e) => { /* 'ready' | 'error' | 'exit' */ },
   // Where the app placed the CI-built artifacts (defaults to package-relative):
   // jsUrl, wasmUrl,
@@ -26,6 +27,7 @@ const engine = await load({
 engine.pause();
 engine.resume();
 engine.setInput('rsdkv4');
+engine.purgeStorage();           // borra Data.rsdk/settings.ini de este namespace
 engine.destroy();
 ```
 
@@ -84,6 +86,15 @@ is booted with the `UsingCWD` arg).
 
 (`'idbfs'` isn't supported under WASMFS and is treated as in-memory.)
 
+### Per-game storage namespace — `config.storageNamespace`
+- `undefined` (default) — uses `/data/default`.
+- `'sonic1'` / `'sonic2'` (recommended) — keeps each game in its own folder,
+  e.g. `/data/sonic1` and `/data/sonic2`.
+- Supports nested paths like `'sonic1/profile-a'`.
+
+This prevents cross-game reuse collisions and allows purging one game's files
+without touching the others.
+
 ### Skip re-fetch when already persisted
 When the working dir is OPFS-backed, the SDK checks whether `/data/Data.rsdk`
 (and `settings.ini`) already exist and **reuses them instead of re-downloading**.
@@ -95,8 +106,24 @@ fetches the ROM and it will only run on first load / non-isolated pages:
 await load({
   canvas,
   assets: {},                                  // no eager 40 MB download
+  storageNamespace: 'sonic1',                  // namespace-specific cache
   dataProvider: () => fetch('/Data.rsdk').then(r => r.arrayBuffer()),
 });
+```
+
+To purge only one game's persisted files:
+
+```js
+const sonic2 = await load({
+  canvas,
+  assets: {},
+  storageNamespace: 'sonic2',
+  dataProvider: () => fetch('/sonic2/Data.rsdk').then(r => r.arrayBuffer()),
+});
+
+// Removes /data/sonic2/Data.rsdk and /data/sonic2/settings.ini only.
+const purged = sonic2.purgeStorage();
+console.log(purged); // { data: true|false, settings: true|false }
 ```
 
 > Persistence only actually engages under cross-origin isolation (see the OPFS

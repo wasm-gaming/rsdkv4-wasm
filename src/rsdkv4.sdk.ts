@@ -20,7 +20,8 @@ import { DEFAULT_RSDKV4_OPTIONS, type Rsdkv4Options } from './rsdkv4.options.js'
 
 export { manifest };
 
-const WORK_DIR = '/data';
+const WORK_ROOT = '/data';
+const DEFAULT_STORAGE_NAMESPACE = 'default';
 
 /** Serialize engine options into RSDKv4's settings.ini format. */
 function buildSettingsIni(options: Rsdkv4Options = {}): string {
@@ -48,6 +49,35 @@ function toUint8(x: unknown): Uint8Array | null {
   throw new TypeError('asset must be Uint8Array | ArrayBuffer | string');
 }
 
+/** Normalize a user-provided storage namespace into a safe relative path. */
+function normalizeStorageNamespace(namespace: unknown): string {
+  if (typeof namespace !== 'string' || !namespace.trim()) return DEFAULT_STORAGE_NAMESPACE;
+
+  const cleaned = namespace
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .map((segment) => segment.replace(/[^A-Za-z0-9._-]/g, '_'))
+    .filter(Boolean)
+    .join('/');
+
+  return cleaned || DEFAULT_STORAGE_NAMESPACE;
+}
+
+/** Best-effort mkdir -p for the Emscripten FS layer. */
+function ensureDir(Module: any, path: string): void {
+  const parts = path.split('/').filter(Boolean);
+  let current = '';
+  for (const part of parts) {
+    current += `/${part}`;
+    try {
+      Module.FS.mkdir(current);
+    } catch {
+      /* already exists */
+    }
+  }
+}
+
 /**
  * Mount the game working dir, honoring `persist`:
  *   'opfs'     → force an OPFS (persistent) mount; warn + fall back if unavailable.
@@ -65,7 +95,7 @@ function mountWorkingDir(Module: any, persist: EngineConfig['persist']): { persi
 
   if (attemptOpfs && typeof Module.ccall === 'function') {
     try {
-      const rc = Module.ccall('web_mount_opfs', 'number', ['string'], [WORK_DIR]);
+      const rc = Module.ccall('web_mount_opfs', 'number', ['string'], [WORK_ROOT]);
       if (rc === 0) return { persistent: true };
     } catch {
       /* fall through to in-memory */
@@ -74,11 +104,7 @@ function mountWorkingDir(Module: any, persist: EngineConfig['persist']): { persi
       console.warn('[rsdkv4] OPFS requested but unavailable — using in-memory WASMFS');
     }
   }
-  try {
-    Module.FS.mkdir(WORK_DIR);
-  } catch {
-    /* already exists */
-  }
+  ensureDir(Module, WORK_ROOT);
   return { persistent: false };
 }
 
@@ -86,6 +112,17 @@ function mountWorkingDir(Module: any, persist: EngineConfig['persist']): { persi
 function fileExists(Module: any, path: string): boolean {
   try {
     Module.FS.stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Delete a file if present; returns true when something was removed. */
+function deleteFileIfExists(Module: any, path: string): boolean {
+  if (!fileExists(Module, path)) return false;
+  try {
+    Module.FS.unlink(path);
     return true;
   } catch {
     return false;
@@ -103,6 +140,10 @@ export type Rsdkv4Instance = EngineInstance & {
   devMenu: RsdkDevMenuBridge;
   /** True when the working dir is OPFS-backed (persistent) rather than in-memory. */
   persistent: boolean;
+  /** Relative storage namespace used under /data (e.g. "sonic1", "sonic2"). */
+  storageNamespace: string;
+  /** Remove persisted game files for this namespace only. */
+  purgeStorage(): { data: boolean; settings: boolean };
 };
 
 /**
@@ -113,6 +154,11 @@ export type Rsdkv4Instance = EngineInstance & {
 export type Rsdkv4LoadConfig = EngineConfig & {
   dataProvider?: () => Promise<AssetData> | AssetData;
   settingsProvider?: () => Promise<AssetData> | AssetData;
+  /**
+   * Per-game storage folder under /data used for OPFS/WASMFS files.
+   * Examples: "sonic1", "sonic2", "my-pack/v1".
+   */
+  storageNamespace?: string;
 };
 
 /** Boot the RSDKv4 engine. */
@@ -150,14 +196,20 @@ export async function load(config: Rsdkv4LoadConfig): Promise<Rsdkv4Instance> {
   // Mount the working dir first, so we can see what's already persisted (OPFS)
   // before deciding whether to pull assets.
   const { persistent } = mountWorkingDir(Module, config.persist);
-  const dataPath = `${WORK_DIR}/Data.rsdk`;
-  const settingsPath = `${WORK_DIR}/settings.ini`;
+  const storageNamespace = normalizeStorageNamespace(config.storageNamespace);
+  const workDir = `${WORK_ROOT}/${storageNamespace}`;
+  ensureDir(Module, workDir);
+
+  const dataPath = `${workDir}/Data.rsdk`;
+  const settingsPath = `${workDir}/settings.ini`;
 
   // Data.rsdk — precedence: explicit asset > already persisted (skip fetch) > lazy provider.
   let dataBytes = toUint8(assets?.data);
   if (!dataBytes) {
     if (fileExists(Module, dataPath)) {
-      console.log('[rsdkv4] Data.rsdk already in persistent storage — skipping fetch');
+      console.log(
+        `[rsdkv4] Data.rsdk already in persistent storage (${storageNamespace}) — skipping fetch`,
+      );
     } else if (config.dataProvider) {
       dataBytes = toUint8(await config.dataProvider());
     }
@@ -182,7 +234,7 @@ export async function load(config: Rsdkv4LoadConfig): Promise<Rsdkv4Instance> {
   }
   // else: keep the persisted settings.ini
 
-  Module.FS.chdir(WORK_DIR);
+  Module.FS.chdir(workDir);
 
   const setPaused = (paused: boolean) => {
     if (typeof Module.web_devmenu_set_paused === 'function') Module.web_devmenu_set_paused(paused);
@@ -229,6 +281,13 @@ export async function load(config: Rsdkv4LoadConfig): Promise<Rsdkv4Instance> {
     },
     devMenu,
     persistent,
+    storageNamespace,
+    purgeStorage() {
+      return {
+        data: deleteFileIfExists(Module, dataPath),
+        settings: deleteFileIfExists(Module, settingsPath),
+      };
+    },
   };
 }
 
