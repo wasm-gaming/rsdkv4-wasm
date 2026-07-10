@@ -43,6 +43,7 @@ jobs:
 
       - name: Validate
         run: |
+          make clean
           make typecheck
           make test
 

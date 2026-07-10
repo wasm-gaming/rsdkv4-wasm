@@ -1,8 +1,10 @@
 {
   // Demo is compiled separately so src/demo/demo.ts → dist/demo.js (flat, sibling
-  // to the built SDK). It resolves the SDK from the already-built dist/*.d.ts and
-  // keeps the bare package specifier in the output (the page's import map maps it
-  // to ./rsdkv4.sdk.js at runtime). Run after `build:lib`.
+  // to the built SDK). Keep the bare package specifier in output (the page's
+  // import map maps it to ./rsdkv4.sdk.js at runtime).
+  //
+  // For type-checking, prefer dist declarations when present, but fall back to a
+  // local ambient module so CI can run `make typecheck` in a clean checkout.
   "compilerOptions": {
     "target": "ES2022",
     "module": "NodeNext",
@@ -15,7 +17,10 @@
     "verbatimModuleSyntax": true,
     "baseUrl": ".",
     "paths": {
-      "@wasm-gaming/engine-rsdkv4": ["./dist/rsdkv4/rsdkv4.sdk.d.ts"]
+      "@wasm-gaming/engine-rsdkv4": [
+        "./dist/rsdkv4/rsdkv4.sdk.d.ts",
+        "./src/demo/engine-rsdkv4.local.d.ts"
+      ]
     }
   },
   "include": ["src/demo/**/*.ts"]
