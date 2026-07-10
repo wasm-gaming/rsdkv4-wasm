@@ -23,16 +23,16 @@
   "comment:scripts": "Build logic lives in the Makefile, not here (make build / build-sdk / build-wasm / preview).",
   "scripts": {},
   "peerDependencies": {
-    "@wasm-gaming/wasm-specs": "*"
+    "@wasm-gaming/engine-specs": "*"
   },
   "peerDependenciesMeta": {
-    "@wasm-gaming/wasm-specs": {
+    "@wasm-gaming/engine-specs": {
       "optional": true
     }
   },
   "devDependencies": {
     "typescript": "^5.5.0"
   },
-  "engineContract": "https://github.com/wasm-gaming/wasm-specs",
+  "engineContract": "https://github.com/wasm-gaming/engine-specs",
   "license": "MIT"
 }

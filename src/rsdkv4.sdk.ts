@@ -1,6 +1,6 @@
 // @wasm-gaming/engine-rsdkv4 — SDK entry point.
 //
-// Conforms to the wasm-gaming engine contract (github.com/wasm-gaming/wasm-specs):
+// Conforms to the wasm-gaming engine contract (github.com/wasm-gaming/engine-specs):
 // exports `manifest` (declarative) and `load(config)` (imperative).
 //
 // One game-agnostic rsdkv4.wasm runs both Sonic 1 and Sonic 2 — the difference is
@@ -14,7 +14,7 @@
 // `config.persist` (see mountWorkingDir), and when the dir is OPFS-backed the SDK
 // reuses an already-persisted Data.rsdk/settings.ini instead of re-fetching.
 
-import type { EngineConfig, EngineInstance, AssetData } from '@wasm-gaming/wasm-specs';
+import type { EngineConfig, EngineInstance, AssetData } from '@wasm-gaming/engine-specs';
 import { manifest } from './rsdkv4.manifest.js';
 import { DEFAULT_RSDKV4_OPTIONS, type Rsdkv4Options } from './rsdkv4.options.js';
 

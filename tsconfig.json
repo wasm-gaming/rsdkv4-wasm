@@ -14,7 +14,7 @@
     "verbatimModuleSyntax": true,
     "baseUrl": ".",
     "paths": {
-      "@wasm-gaming/wasm-specs": ["../wasm-specs/dist/index.d.ts"]
+      "@wasm-gaming/engine-specs": ["./.peers/engine-specs/dist/index.d.ts"]
     }
   },
   "include": ["src"],

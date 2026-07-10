@@ -52,9 +52,8 @@ typecheck: node_modules ## Type-check without emitting
 
 preview: ## Serve dist/ at http://localhost:$(PORT)
 	@echo "Serving dist/ at http://localhost:$(PORT) (Ctrl+C to stop)"
-	@# Note: plain server sends no COOP/COEP headers, so OPFS is not isolated here
-	@# and the SDK falls back to the in-memory WASMFS backend. That's fine for preview.
-	python3 -m http.server $(PORT) --directory dist
+	@# Uses a custom local server that injects COOP/COEP for cross-origin isolation.
+	python3 scripts/preview-server.py --port $(PORT) --directory dist
 
 clean: ## Remove build outputs (keeps dist/Data.rsdk and dist/settings.ini)
 # 	rm -rf .tmp

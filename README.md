@@ -2,7 +2,7 @@
 
 RSDKv4 (Retro Software Development Kit v4, Rubberduckycooly/mattConn decompilation)
 compiled to WebAssembly, wrapped in a small JS SDK that conforms to the
-[wasm-gaming engine contract](https://github.com/wasm-gaming/wasm-specs).
+[wasm-gaming engine contract](https://github.com/wasm-gaming/engine-specs).
 
 **One WASM, two games.** The engine binary is game-agnostic. `Data.rsdk` is loaded
 into the Emscripten filesystem *at runtime*, so the same `rsdkv4.wasm` runs both
@@ -161,7 +161,7 @@ make build-wasm   # local: runs scripts/build.sh inside emscripten/emsdk (Docker
   `-sWASMFS -sINVOKE_RUN=0 -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=createRSDKv4`
   + `FS`/`callMain`/`ccall` exported, **without** `--preload-file`.
 
-Resolving the contract types needs the sibling `@wasm-gaming/wasm-specs` built
+Resolving the contract types needs the sibling `@wasm-gaming/engine-specs` built
 (see `tsconfig.json` `paths`).
 
 ### dist/ layout

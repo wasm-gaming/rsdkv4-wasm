@@ -12,7 +12,7 @@
 //      pick / drag-and-drop prompt.
 
 import { load, type Rsdkv4Instance } from '@wasm-gaming/engine-rsdkv4';
-import type { EngineEvent } from '@wasm-gaming/wasm-specs';
+import type { EngineEvent } from '@wasm-gaming/engine-specs';
 
 const picker = document.getElementById('picker') as HTMLDivElement;
 const status = document.getElementById('status') as HTMLParagraphElement;

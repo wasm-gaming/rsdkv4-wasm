@@ -1,8 +1,8 @@
 // The rsdkv4 EngineManifest — typed against the contract, so a drift from
-// @wasm-gaming/wasm-specs is a compile error here. `npm run build:manifest`
+// @wasm-gaming/engine-specs is a compile error here. `npm run build:manifest`
 // serializes this to dist/manifest.json (the artifact CI attaches to a Release).
 
-import type { EngineManifest } from '@wasm-gaming/wasm-specs';
+import type { EngineManifest } from '@wasm-gaming/engine-specs';
 import { RSDKV4_OPTIONS_SCHEMA } from './rsdkv4.options.js';
 
 export const manifest: EngineManifest = {

@@ -11,7 +11,7 @@
 // SDK's settings serializer) when the host does not pass an explicit `settings`
 // asset.
 
-import type { JSONSchema } from '@wasm-gaming/wasm-specs';
+import type { JSONSchema } from '@wasm-gaming/engine-specs';
 
 export interface Rsdkv4Options {
   /**

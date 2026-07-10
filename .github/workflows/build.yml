@@ -1,4 +1,5 @@
-name: build
+
+name: Build
 
 # Builds the TypeScript SDK (on a Node runner) and the game-agnostic RSDKv4 WASM
 # (inside an emscripten/emsdk container job — build.sh runs there directly, no
@@ -30,9 +31,9 @@ jobs:
         with:
           node-version: 24
       # The contract is a sibling repo; fetch it so tsc can resolve types and the
-      # manifest build runs. (Adjust ref once wasm-specs is published.)
+      # manifest build runs. (Adjust ref once engine-specs is published.)
       - name: Fetch engine contract
-        run: git clone --depth=1 https://github.com/wasm-gaming/wasm-specs ../wasm-specs && (cd ../wasm-specs && npm install && npm run build)
+        run: mkdir -p .peers && git clone --depth=1 https://github.com/wasm-gaming/engine-specs .peers/engine-specs && (cd .peers/engine-specs && npm install && npm run build)
       - name: Build SDK (TypeScript)
         run: make build-sdk
       - uses: actions/upload-artifact@v4
