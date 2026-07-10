@@ -1,4 +1,4 @@
-# @wasm-gaming/engine-rsdkv4 — build & preview
+# @wasm-gaming/rsdkv4-wasm — build & preview
 #
 #   make build     Full build → dist/ (TypeScript SDK + WASM)
 #   make preview   Serve dist/ at http://localhost:$(PORT)

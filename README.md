@@ -1,4 +1,4 @@
-# @wasm-gaming/engine-rsdkv4
+# @wasm-gaming/rsdkv4-wasm
 
 RSDKv4 (Retro Software Development Kit v4, Rubberduckycooly/mattConn decompilation)
 compiled to WebAssembly, wrapped in a small JS SDK that conforms to the
@@ -13,7 +13,7 @@ and had to be recompiled per game; this doesn't.)
 ## Contract surface
 
 ```js
-import { manifest, load } from '@wasm-gaming/engine-rsdkv4';
+import { manifest, load } from '@wasm-gaming/rsdkv4-wasm';
 
 const engine = await load({
   canvas,                       // an <canvas id="canvas">

@@ -1,4 +1,4 @@
-declare module '@wasm-gaming/engine-rsdkv4' {
+declare module '@wasm-gaming/rsdkv4-wasm' {
 	export interface Rsdkv4Instance {
 		pause(): void;
 		resume(): void;

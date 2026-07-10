@@ -58,6 +58,14 @@ jobs:
           NEW_TAG=$(npm version "${{ inputs.bump }}" -m "chore(release): %s")
           echo "new_tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
 
+      - name: npm publish preflight
+        run: |
+          npm config get registry
+          npm pack --dry-run
+
+      - name: Publish to npm (trusted publishing)
+        run: npm publish --provenance --access public
+
       - name: Push commit and tag
         run: git push origin HEAD --follow-tags
 
@@ -67,6 +75,3 @@ jobs:
           tag_name: ${{ steps.bump_version.outputs.new_tag }}
           name: ${{ steps.bump_version.outputs.new_tag }}
           generate_release_notes: true
-
-      - name: Publish to npm (trusted publishing)
-        run: npm publish --provenance --access public

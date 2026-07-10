@@ -11,7 +11,7 @@
 //   3. If that fetch fails (e.g. GitHub Pages ships no ROM), we fall back to a
 //      pick / drag-and-drop prompt.
 
-import { load, type Rsdkv4Instance } from '@wasm-gaming/engine-rsdkv4';
+import { load, type Rsdkv4Instance } from '@wasm-gaming/rsdkv4-wasm';
 import type { EngineEvent } from '@wasm-gaming/engine-specs';
 
 const picker = document.getElementById('picker') as HTMLDivElement;

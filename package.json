@@ -1,5 +1,5 @@
 {
-  "name": "@wasm-gaming/engine-rsdkv4",
+  "name": "@wasm-gaming/rsdkv4-wasm",
   "version": "0.1.2",
   "description": "RSDKv4 (Retro Software Development Kit v4) compiled to WebAssembly, with a JS SDK conforming to the wasm-gaming engine contract. Runs Sonic 1 & Sonic 2 from a single WASM by loading Data.rsdk at runtime.",
   "type": "module",

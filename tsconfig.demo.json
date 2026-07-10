@@ -17,9 +17,9 @@
     "verbatimModuleSyntax": true,
     "baseUrl": ".",
     "paths": {
-      "@wasm-gaming/engine-rsdkv4": [
+      "@wasm-gaming/rsdkv4-wasm": [
         "./dist/rsdkv4/rsdkv4.sdk.d.ts",
-        "./src/demo/engine-rsdkv4.local.d.ts"
+        "./src/demo/rsdkv4-wasm.local.d.ts"
       ]
     }
   },
