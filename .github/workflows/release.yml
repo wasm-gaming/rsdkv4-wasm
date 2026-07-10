@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 concurrency:
   group: release
@@ -43,7 +44,6 @@ jobs:
 
       - name: Validate
         run: |
-          make clean
           make typecheck
           make test
 
@@ -68,7 +68,5 @@ jobs:
           name: ${{ steps.bump_version.outputs.new_tag }}
           generate_release_notes: true
 
-      - name: Publish to npm
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npm (trusted publishing)
+        run: npm publish --provenance --access public
