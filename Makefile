@@ -46,7 +46,7 @@ build-demo: build-lib ## Compile demo → dist/{demo.js,index.html}; seed settin
 build-wasm: ## WASM via emscripten/emsdk (Docker) → dist/rsdkv4/rsdkv4.{js,wasm}
 	bash scripts/build-docker.sh
 
-typecheck: node_modules ## Type-check without emitting
+typecheck: build-lib  ## Type-check without emitting
 	$(BIN)/tsc -p tsconfig.json --noEmit
 	$(BIN)/tsc -p tsconfig.demo.json --noEmit
 
