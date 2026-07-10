@@ -17,7 +17,7 @@ BIN := node_modules/.bin
 PORT ?= 8024
 
 .PHONY: build build-sdk build-lib build-manifest build-demo build-wasm \
-        preview typecheck i install clean help
+	preview typecheck test i install clean help
 
 i: install
 install: ## Install dev dependencies (typescript)
@@ -49,6 +49,9 @@ build-wasm: ## WASM via emscripten/emsdk (Docker) → dist/rsdkv4/rsdkv4.{js,was
 typecheck: node_modules ## Type-check without emitting
 	$(BIN)/tsc -p tsconfig.json --noEmit
 	$(BIN)/tsc -p tsconfig.demo.json --noEmit
+
+test: ## Placeholder test target (keeps CI green until test suite exists)
+	@echo "No tests defined yet."
 
 preview: ## Serve dist/ at http://localhost:$(PORT)
 	@echo "Serving dist/ at http://localhost:$(PORT) (Ctrl+C to stop)"
