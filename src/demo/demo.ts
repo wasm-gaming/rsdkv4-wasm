@@ -39,6 +39,21 @@ async function fetchData(): Promise<Uint8Array> {
 
 let booting = false;
 
+function getEngineErrorMessage(ev: EngineEvent): string | null {
+  if (ev.type !== 'error') return null;
+  const maybeError = (ev as { error?: unknown }).error;
+  if (maybeError instanceof Error) return maybeError.message;
+  if (
+    typeof maybeError === 'object' &&
+    maybeError !== null &&
+    'message' in maybeError &&
+    typeof (maybeError as { message?: unknown }).message === 'string'
+  ) {
+    return (maybeError as { message: string }).message;
+  }
+  return 'Unknown error';
+}
+
 async function boot(source: { data?: Uint8Array }): Promise<void> {
   if (booting) return; // ignore extra drops/picks once we've started
   booting = true;
@@ -57,7 +72,8 @@ async function boot(source: { data?: Uint8Array }): Promise<void> {
       // persist: null,     // force the in-memory (MEMFS-equivalent) backend.
       onEvent: (ev: EngineEvent) => {
         console.log('[demo] engine event', ev);
-        if (ev.type === 'error') alert('Engine error: ' + ev.error.message);
+        const message = getEngineErrorMessage(ev);
+        if (message) alert('Engine error: ' + message);
       },
     });
     (window as any).__engine = engine; // console poking: __engine.pause()
