@@ -14,7 +14,7 @@
 # make version. (node/cp/python3/bash resolve via the system PATH already.)
 BIN := node_modules/.bin
 
-PORT ?= 8080
+PORT ?= 8024
 
 .PHONY: build build-sdk build-lib build-manifest build-demo build-wasm \
         preview typecheck i install clean help
