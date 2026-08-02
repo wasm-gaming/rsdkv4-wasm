@@ -1,10 +1,132 @@
 /* RSDKv4 theme overrides for the shared demo template.
- * Loaded after demo.css to customise colours and branding for Sonic games. */
+ *
+ * Loaded after demo.css. The template's components live in shadow roots, so the
+ * only way in is the `--demo-*` custom properties (they inherit through the
+ * shadow boundary); everything below either sets a token or styles the few
+ * light-DOM elements the template owns (`body`, `main`, `.runtime`).
+ *
+ * Look & feel: Sonic 1 / Sonic 2 on the Mega Drive — Green Hill sky over a
+ * checkered dirt band, chunky navy HUD panels, ring-gold accents. Colours are
+ * kept close to the 9-bit Genesis palette the games actually used.
+ */
 
 :root {
-  --accent: #0066ff;
-  --accent-hover: #3388ff;
-  --accent-glow: rgba(0, 102, 255, 0.25);
-  --bg: #0a0a12;
-  --surface: #14141e;
+  /* --- Mega Drive palette ------------------------------------------------ */
+  --s1-sky: #0058c8;        /* upper Green Hill sky   */
+  --s1-sky-low: #58c0f8;    /* horizon haze           */
+  --s1-navy: #101c60;       /* title screen / HUD navy*/
+  --s1-navy-deep: #080e38;
+  --s1-blue: #2044d8;       /* Sonic sprite blue      */
+  --s1-blue-lit: #4c84f8;   /* sprite highlight       */
+  --s1-gold: #ffd800;       /* ring                   */
+  --s1-gold-deep: #e0a000;
+  --s1-green: #00b830;      /* Green Hill grass       */
+  --s1-green-lit: #58e058;
+  --s1-dirt: #b85818;       /* checkered ground, dark */
+  --s1-dirt-lit: #f0a038;   /* checkered ground, lit  */
+
+  /* --- Background: Green Hill sky ---------------------------------------- */
+  --demo-bg-a: var(--s1-sky);
+  --demo-bg-b: var(--s1-sky-low);
+  --demo-bg-gradient: linear-gradient(180deg, var(--demo-bg-a) 0%, var(--demo-bg-b) 100%);
+  --demo-bg-radial-1: rgba(255, 255, 255, 0.22); /* cloud bank */
+  --demo-bg-radial-2: rgba(255, 216, 0, 0.16);   /* low sun     */
+
+  /* --- Type -------------------------------------------------------------- */
+  --demo-text: #ffffff;
+  --demo-muted: #a8c4f0;
+
+  /* --- Accents: rings (gold) + grass (green) ----------------------------- */
+  --demo-accent: var(--s1-gold);
+  --demo-accent-rgb: 255, 216, 0;
+  --demo-accent-glow: 0 0 12px rgba(var(--demo-accent-rgb), 0.45), 0 0 28px rgba(var(--demo-accent-rgb), 0.2);
+
+  --demo-accent2: var(--s1-green);
+  --demo-accent2-rgb: 0, 184, 48;
+  --demo-accent2-glow: 0 0 12px rgba(var(--demo-accent2-rgb), 0.45), 0 0 28px rgba(var(--demo-accent2-rgb), 0.2);
+
+  /* --- Panels: solid navy HUD, hard edges, no glass ---------------------- */
+  --demo-panel-bg: rgba(16, 28, 96, 0.94);
+  --demo-panel-border: var(--s1-navy-deep);
+  /* Chunky 16-bit bevel, faked with inset rings since border-width isn't a token. */
+  --demo-panel-shadow:
+    inset 0 0 0 3px var(--s1-blue),
+    inset 0 0 0 5px var(--s1-navy-deep),
+    inset 0 3px 0 5px rgba(255, 255, 255, 0.12);
+  --demo-panel-blur: 2px;
+  --demo-panel-radius: 4px;
+
+  --demo-subpanel-bg: rgba(32, 52, 140, 0.75);
+  --demo-subpanel-border: var(--s1-blue-lit);
+  --demo-subpanel-shadow: inset 0 0 0 2px rgba(8, 14, 56, 0.55);
+  --demo-subpanel-blur: 0px;
+  --demo-subpanel-radius: 3px;
+
+  /* --- Drop zones -------------------------------------------------------- */
+  --demo-drop-bg: rgba(8, 14, 56, 0.55);
+  --demo-drop-border: rgba(255, 255, 255, 0.45);
+  --demo-drop-active-bg: rgba(var(--demo-accent2-rgb), 0.18);
+  --demo-drop-active-border: var(--s1-green-lit);
+  --demo-drop-active-shadow: inset 0 0 0 2px rgba(var(--demo-accent2-rgb), 0.5);
+
+  /* --- Buttons: Sonic blue ---------------------------------------------- */
+  --demo-picker-bg: var(--s1-blue);
+  --demo-picker-hover-bg: var(--s1-blue-lit);
+  --demo-picker-border: rgba(255, 255, 255, 0.35);
+  --demo-picker-hover-border: var(--s1-gold);
+  --demo-picker-text: #ffffff;
+
+  /* Launch reads as the START prompt: ring gold on navy. */
+  --demo-launch-bg: linear-gradient(180deg, var(--s1-gold) 0%, var(--s1-gold-deep) 100%);
+  --demo-launch-text: var(--s1-navy);
+
+  /* --- Metadata pills ---------------------------------------------------- */
+  --demo-pill-bg: rgba(var(--demo-accent-rgb), 0.12);
+  --demo-pill-border: var(--s1-gold);
+  --demo-pill-text: var(--s1-gold);
+  --demo-pill-shadow: inset 0 0 6px rgba(var(--demo-accent-rgb), 0.3);
+
+  /* --- Canvas overlay ---------------------------------------------------- */
+  --demo-file-info-bg: rgba(16, 28, 96, 0.85);
+  --demo-file-info-border: var(--s1-blue);
+  --demo-file-info-blur: 4px;
+
+  /* --- ESC / pause menu -------------------------------------------------- */
+  --demo-esc-bg: rgba(8, 14, 56, 0.82);
+  --demo-esc-card-bg: rgba(16, 28, 96, 0.96);
+  --demo-esc-text: #ffffff;
+}
+
+/* Green Hill ground: grass lip over the checkered dirt the zone is known for.
+ * Sits behind the launcher (main is z-index 1) and never eats pointer events. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: auto 0 0 0;
+  height: clamp(140px, 26vh, 260px);
+  z-index: 0;
+  pointer-events: none;
+  background:
+    /* grass lip */
+    linear-gradient(180deg,
+      var(--s1-green-lit) 0,
+      var(--s1-green-lit) 6px,
+      var(--s1-green) 6px,
+      var(--s1-green) 26px,
+      transparent 26px),
+    /* checkered dirt */
+    repeating-conic-gradient(var(--s1-dirt) 0% 25%, var(--s1-dirt-lit) 0% 50%)
+      0 26px / 32px 32px;
+}
+
+/* RSDKv4 draws low-res sprite art; keep the upscale crisp instead of blurry. */
+.runtime canvas {
+  image-rendering: pixelated;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --demo-panel-bg: var(--s1-navy);
+    --demo-drop-bg: var(--s1-navy-deep);
+  }
 }
