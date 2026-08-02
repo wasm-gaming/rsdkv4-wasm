@@ -24,6 +24,12 @@ export interface Rsdkv4Options {
   engineDebugMode?: boolean;
   /** VSync the engine's SDL window. */
   vsync?: boolean;
+  /**
+   * Skip RSDKv4's in-canvas Start Menu (save select / character select / game
+   * options). Set this when the host draws those screens itself from
+   * `instance.game` — otherwise the engine's own menu runs underneath.
+   */
+  skipStartMenu?: boolean;
   /** Boot directly into a stage: 0-based stage-list category. */
   startingCategory?: number;
   /** Boot directly into a stage: 0-based scene within the category. */
@@ -43,6 +49,7 @@ export const DEFAULT_RSDKV4_OPTIONS: Required<Rsdkv4Options> = {
   devMenu: false,
   engineDebugMode: true,
   vsync: true,
+  skipStartMenu: false,
   startingCategory: RSDKV4_UNSET,
   startingScene: RSDKV4_UNSET,
   startingPlayer: RSDKV4_UNSET,
@@ -64,6 +71,12 @@ export const RSDKV4_OPTIONS_SCHEMA: JSONSchema = {
       description: 'Enables the web devmenu embind bridge (stage list / warp / pause).',
     },
     vsync: { type: 'boolean', default: true },
+    skipStartMenu: {
+      type: 'boolean',
+      default: false,
+      description:
+        "Skip the engine's own save/character/options screens — set it when the host renders them from instance.game.",
+    },
     startingCategory: {
       type: 'integer',
       minimum: 0,

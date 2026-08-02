@@ -163,6 +163,237 @@ main.running {
   image-rendering: pixelated;
 }
 
+/* --- Save select (src/demo/start-screens.ts) ------------------------------ *
+ * One screen that picks the file and the character, shaped like Sonic Mania's
+ * save select: a row of portrait cards, status on top, character in the middle,
+ * chaos emeralds along the bottom. All of it is drawn here — the only image is
+ * the game logo the demo passes in. */
+.rsdk-start {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(0.75rem, 2.5vh, 1.75rem);
+  padding: clamp(0.75rem, 3vw, 2rem);
+  overflow-y: auto;
+  background:
+    radial-gradient(circle at 50% 8%, rgba(88, 192, 248, 0.22), transparent 62%),
+    var(--s1-navy-deep);
+  color: #fff;
+  text-align: center;
+}
+
+.rsdk-start-title {
+  margin: 0;
+  font-size: clamp(1.1rem, 3vw, 1.9rem);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-shadow: 0 3px 0 var(--s1-navy), 0 0 18px rgba(88, 192, 248, 0.5);
+}
+
+.rsdk-start-logo {
+  display: block;
+  width: min(34rem, 62vw);
+  max-height: 24vh;
+  object-fit: contain;
+  filter: drop-shadow(0 6px 0 rgba(0, 0, 0, 0.45));
+}
+
+.rsdk-start-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  justify-content: center;
+  gap: clamp(0.5rem, 1.4vw, 1rem);
+  max-width: 66rem;
+}
+
+/* A card: black frame, status strip, art well, emerald rail. */
+.rsdk-start-card {
+  display: flex;
+  flex-direction: column;
+  width: clamp(7.5rem, 12vw, 9.5rem);
+  /* Cards line up whatever they hold: a resumed file (one portrait and a line
+   * of text) is shorter than an empty one (a character to pick out of four). */
+  min-height: clamp(10rem, 24vh, 12rem);
+  padding: 4px;
+  gap: 4px;
+  border: 3px solid #000;
+  border-radius: 4px;
+  background: var(--s1-navy);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.45);
+}
+
+.rsdk-start-card[data-state='nosave'] {
+  background: var(--s1-navy-deep);
+}
+
+.rsdk-start-strip {
+  padding: 0.3rem 0;
+  background: #000;
+  color: var(--s1-gold);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+/* The art well — one big button on a used file, one per character on an empty
+ * one. Both fill the card so the whole picture is the click target. */
+.rsdk-start-continue,
+.rsdk-start-chars {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 6.5rem;
+  padding: 0.5rem 0.35rem;
+  background: linear-gradient(150deg, var(--s1-sky) 0 42%, var(--s1-blue) 42% 100%);
+}
+
+.rsdk-start-continue {
+  flex-direction: column;
+  gap: 0.3rem;
+  border: none;
+  color: #fff;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.rsdk-start-chars {
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.rsdk-start-char {
+  padding: 3px;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  line-height: 0;
+}
+
+.rsdk-start-choice:focus-visible,
+.rsdk-start-char:hover {
+  outline: none;
+  border-color: var(--s1-gold);
+  box-shadow: 0 0 0 2px rgba(255, 216, 0, 0.45), 0 0 16px rgba(255, 216, 0, 0.5);
+}
+
+.rsdk-start-continue:focus-visible,
+.rsdk-start-continue:hover {
+  outline: 3px solid var(--s1-gold);
+  outline-offset: -3px;
+}
+
+/* Selecting a card lifts it, like the highlighted file in Mania. */
+.rsdk-start-card:has(.rsdk-start-choice:focus-visible),
+.rsdk-start-card:has(.rsdk-start-choice:hover) {
+  border-color: var(--s1-gold);
+  transform: translateY(-4px);
+}
+
+.rsdk-start-card {
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.rsdk-start-where {
+  padding: 0 0.2rem;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.6);
+}
+
+.rsdk-start-card[data-state='filled'] .rsdk-start-where {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rsdk-start-stats {
+  display: flex;
+  justify-content: center;
+  gap: 0.4rem;
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.6);
+}
+
+.rsdk-start-score::before {
+  content: '\2605 ';
+  color: var(--s1-gold);
+}
+
+/* Emerald rail: seven gems, the save's own lit. */
+.rsdk-start-gems {
+  display: flex;
+  justify-content: center;
+  gap: 2px;
+  padding: 3px 0;
+  background: #000;
+}
+
+.rsdk-start-gem {
+  width: 10px;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.14);
+  clip-path: polygon(50% 0, 100% 38%, 50% 100%, 0 38%);
+}
+
+.rsdk-start-gem.is-owned[data-gem='0'] { background: #58e058; }
+.rsdk-start-gem.is-owned[data-gem='1'] { background: #f0a038; }
+.rsdk-start-gem.is-owned[data-gem='2'] { background: #f078d8; }
+.rsdk-start-gem.is-owned[data-gem='3'] { background: #9878f0; }
+.rsdk-start-gem.is-owned[data-gem='4'] { background: #f0f0f0; }
+.rsdk-start-gem.is-owned[data-gem='5'] { background: #f07878; }
+.rsdk-start-gem.is-owned[data-gem='6'] { background: #78c0f8; }
+
+/* Character badges. The engine's player order is Sonic, Tails, Knuckles,
+ * Sonic & Tails — index-keyed so it degrades gracefully for other packs. */
+.rsdk-start-face {
+  position: relative;
+  display: inline-block;
+  border-radius: 50%;
+  background: var(--s1-blue);
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.35), inset 0 3px 0 rgba(255, 255, 255, 0.28);
+}
+
+.rsdk-start-face--sm { width: 1.1rem; height: 1.1rem; }
+.rsdk-start-face--md { width: 1.9rem; height: 1.9rem; }
+.rsdk-start-face--lg { width: 3.1rem; height: 3.1rem; }
+
+/* The muzzle — the one shape that reads as a Sonic-ish character at any size. */
+.rsdk-start-face::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  width: 55%;
+  height: 38%;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: #f8d8b0;
+}
+
+.rsdk-start-face[data-character='0'] { background: var(--s1-blue); }
+.rsdk-start-face[data-character='1'] { background: var(--s1-dirt-lit); }
+.rsdk-start-face[data-character='2'] { background: #e02020; }
+.rsdk-start-face[data-character='3'] {
+  background: linear-gradient(105deg, var(--s1-blue) 0 50%, var(--s1-dirt-lit) 50% 100%);
+}
+
+.rsdk-start-hint {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 @media (prefers-reduced-transparency: reduce) {
   :root {
     --demo-panel-bg: var(--s1-navy);

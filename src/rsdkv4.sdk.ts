@@ -48,6 +48,9 @@ function buildSettingsIni(options: Rsdkv4Options = {}): string {
     `StartingScene=${o.startingScene | 0}`,
     `StartingPlayer=${o.startingPlayer | 0}`,
     '',
+    '[Game]',
+    `SkipStartMenu=${o.skipStartMenu ? 'true' : 'false'}`,
+    '',
     '[Window]',
     `VSync=${o.vsync ? 'true' : 'false'}`,
     '',
@@ -155,6 +158,87 @@ function fileExists(Module: any, path: string): boolean {
   }
 }
 
+/**
+ * Wait for Engine::Init, which runs on the engine's first frame (main.cpp's
+ * main_loop), not inside callMain. Gives up after ~4s rather than hanging the
+ * host: everything still works, the first read just comes back empty.
+ */
+async function waitForEngine(Module: any, timeoutMs = 4000): Promise<boolean> {
+  if (typeof Module.web_engine_ready !== 'function') return false;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (Module.web_engine_ready()) return true;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+  console.warn('[rsdkv4] engine did not report ready within %dms', timeoutMs);
+  return false;
+}
+
+/** RSDKv4's save file, written next to the game data in the working dir. */
+const SAVE_FILE = 'SData.bin';
+
+/**
+ * OPFS handle for `<namespace>/`, reached with the plain (async) OPFS API from
+ * JS — which, unlike the WASM side's sync access handles, works on the main
+ * thread of any page. Returns null when OPFS isn't available at all.
+ */
+async function opfsNamespaceDir(
+  namespace: string,
+  create: boolean,
+): Promise<FileSystemDirectoryHandle | null> {
+  if (typeof navigator === 'undefined' || !navigator.storage?.getDirectory) return null;
+  try {
+    let dir = await navigator.storage.getDirectory();
+    for (const segment of namespace.split('/').filter(Boolean)) {
+      dir = await dir.getDirectoryHandle(segment, { create });
+    }
+    return dir;
+  } catch {
+    return null; // missing (create: false), or blocked
+  }
+}
+
+/**
+ * Mirror for the engine's save file.
+ *
+ * The working dir is in-memory whenever the OPFS *mount* is unavailable (which
+ * is every build without Asyncify/JSPI — see mountWorkingDir), so SData.bin
+ * would die with the page and every save slot would read "NEW GAME" forever.
+ * The host's own OPFS access has no such limitation, so the SDK copies the file
+ * in before the engine boots and back out as it changes. Saves therefore
+ * survive reloads even while the mounted working dir does not.
+ */
+async function restoreSaveData(Module: any, namespace: string, workDir: string): Promise<void> {
+  const dir = await opfsNamespaceDir(namespace, false);
+  if (!dir) return;
+  try {
+    const file = await (await dir.getFileHandle(SAVE_FILE)).getFile();
+    if (file.size > 0) {
+      Module.FS.writeFile(`${workDir}/${SAVE_FILE}`, new Uint8Array(await file.arrayBuffer()));
+    }
+  } catch {
+    /* no save yet */
+  }
+}
+
+async function persistSaveData(Module: any, namespace: string, workDir: string): Promise<void> {
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    bytes = Module.FS.readFile(`${workDir}/${SAVE_FILE}`);
+  } catch {
+    return; // the engine hasn't written one
+  }
+  const dir = await opfsNamespaceDir(namespace, true);
+  if (!dir) return;
+  try {
+    const writable = await (await dir.getFileHandle(SAVE_FILE, { create: true })).createWritable();
+    await writable.write(bytes);
+    await writable.close();
+  } catch (e) {
+    console.warn('[rsdkv4] could not persist save data', e);
+  }
+}
+
 /** Delete a file if present; returns true when something was removed. */
 function deleteFileIfExists(Module: any, path: string): boolean {
   if (!fileExists(Module, path)) return false;
@@ -173,8 +257,68 @@ export interface RsdkDevMenuBridge {
   setPaused(paused: boolean): void;
 }
 
-export type Rsdkv4Instance = EngineInstance & {
+/** One of RSDKv4's four save slots, as the engine's own save-select screen sees it. */
+export interface RsdkSaveSlot {
+  /** 0-3. */
+  slot: number;
+  /** No game stored here — starting it means picking a character first. */
+  empty: boolean;
+  /** Character index into `players()`: 0 Sonic, 1 Tails, 2 Knuckles, 3 Sonic & Tails. */
+  character: number;
+  lives: number;
+  score: number;
+  emeralds: number;
+  /** Stage list the save resumes into (1 regular, 3 special), or -1 when empty. */
+  list: number;
+  /** 0-based scene within `list` — index it against `devMenu.getStageList()`. */
+  zone: number;
+}
+
+/** A row of the engine's GAME OPTIONS screen (differs between Sonic 1 and 2). */
+export interface RsdkGameOption {
+  key: string;
+  label: string;
+  value: number;
+  type: 'boolean' | 'enum';
+  /** Choice labels, for `type: 'enum'` (item box sets). */
+  values?: string[];
+}
+
+/**
+ * The engine's Start Menu as data, so a host can render save-slot / character /
+ * game-option screens itself. Everything here mirrors what RSDKv4's own in-canvas
+ * menu does — see WebGame.cpp.
+ */
+export interface RsdkGameBridge {
+  /** 1 = Sonic 1, 2 = Sonic 2, 0 = unrecognised pack. */
+  type(): number;
+  /** Playable characters from the pack's GameConfig, in engine order. */
+  players(): string[];
+  saveSlots(): RsdkSaveSlot[];
+  /**
+   * Start a game the way the native menu would: a slot with data continues it,
+   * an empty slot starts a new game as `player`, and `slot: null` plays without
+   * saving. Resumes the engine if the SDK had it paused.
+   */
+  start(slot: number | null, player?: number): void;
+  /** Wipe a slot back to "NEW GAME". */
+  deleteSave(slot: number): void;
+  options(): RsdkGameOption[];
+  /** Set an option; written through to the engine and its save file, as the engine does. */
+  setOption(key: string, value: number): void;
+}
+
+export type Rsdkv4Instance = Omit<EngineInstance, 'pause' | 'resume'> & {
+  /**
+   * Pause, on behalf of `owner` (default 'host'). The first caller to pause owns
+   * it and only that owner's `resume()` lifts it, so a pause overlay can't
+   * resume a game a start screen — or the host — had already frozen. Audio stops
+   * with the engine.
+   */
+  pause(owner?: string): void;
+  resume(owner?: string): void;
   devMenu: RsdkDevMenuBridge;
+  game: RsdkGameBridge;
   /** True when the working dir is OPFS-backed (persistent) rather than in-memory. */
   persistent: boolean;
   /** Relative storage namespace used under /data (e.g. "sonic1", "sonic2"). */
@@ -353,10 +497,102 @@ export async function load(config: Rsdkv4LoadConfig): Promise<Rsdkv4Instance> {
   }
   // else: keep the persisted settings.ini
 
+  // Save data. `persist: null` means the host wants nothing kept, so honour it;
+  // otherwise pull any previous SData.bin in before the engine reads it.
+  const mirrorSaves = config.persist !== null;
+  if (mirrorSaves) await restoreSaveData(Module, storageNamespace, workDir);
+
   Module.FS.chdir(workDir);
 
-  const setPaused = (paused: boolean) => {
+  /**
+   * Pause state, with an owner.
+   *
+   * `masterPaused` only freezes the logic loop — the audio callback keeps
+   * mixing, so a paused engine went on playing its music behind whatever the
+   * host put on top. Pausing therefore has to stop the sound too.
+   *
+   * The owner matters because pause/resume has several callers: a pause overlay,
+   * a start screen, the host itself. Closing an overlay must not resume a game
+   * something else had already frozen, so the *first* pause claims ownership and
+   * only that owner's `resume()` lifts it. Owner strings are the caller's to
+   * choose; the SDK's own default is 'host'.
+   */
+  type PauseOwner = string;
+  let pauseOwner: PauseOwner | null = null;
+
+  const applyPaused = (paused: boolean) => {
     if (typeof Module.web_devmenu_set_paused === 'function') Module.web_devmenu_set_paused(paused);
+    if (typeof Module.web_audio_set_paused === 'function') Module.web_audio_set_paused(paused);
+  };
+
+  const pauseWith = (owner: PauseOwner) => {
+    if (pauseOwner !== null) return; // already paused — whoever got there first keeps the claim
+    pauseOwner = owner;
+    applyPaused(true);
+    // A pause is a natural checkpoint for the save mirror.
+    if (mirrorSaves) void persistSaveData(Module, storageNamespace, workDir);
+  };
+
+  const resumeFrom = (owner: PauseOwner) => {
+    if (pauseOwner !== owner) return; // someone else's pause — leave it alone
+    pauseOwner = null;
+    applyPaused(false);
+  };
+
+  /** Legacy shape kept for `devMenu.setPaused` — always acts as the host. */
+  const setPaused = (paused: boolean) => {
+    if (paused) pauseWith('host');
+    else resumeFrom(pauseOwner ?? 'host');
+  };
+
+  const stopAudio = () => {
+    try {
+      Module.web_audio_stop?.();
+    } catch {
+      /* engine already down */
+    }
+  };
+
+  /**
+   * Call a `web_*` embind getter and parse its JSON.
+   *
+   * A missing function means the loaded rsdkv4.wasm predates that bridge — the
+   * usual cause is a browser serving a cached build. Say so out loud: silently
+   * returning an empty list makes a stale artifact look like an empty save file
+   * or a game with no playable characters.
+   */
+  const parseJson = <T>(fn: unknown, fallback: T, what: string): T => {
+    if (typeof fn !== 'function') {
+      console.error(
+        `[rsdkv4] ${what} is missing from this build of rsdkv4.wasm — the page is probably running a cached copy. Hard-reload (or clear the site's storage) after rebuilding.`,
+      );
+      return fallback;
+    }
+    try {
+      return JSON.parse((fn as () => string)());
+    } catch (e) {
+      console.error(`[rsdkv4] ${what} failed`, e);
+      return fallback;
+    }
+  };
+
+  const game: RsdkGameBridge = {
+    type: () => (typeof Module.web_game_type === 'function' ? Module.web_game_type() : 0),
+    players: () => parseJson(Module.web_get_players, [] as string[], 'web_get_players'),
+    saveSlots: () => parseJson(Module.web_get_save_slots, [] as RsdkSaveSlot[], 'web_get_save_slots'),
+    options: () => parseJson(Module.web_get_game_options, [] as RsdkGameOption[], 'web_get_game_options'),
+    setOption(key, value) {
+      Module.web_set_game_option?.(String(key), value | 0);
+    },
+    deleteSave(slot) {
+      Module.web_delete_save?.(slot | 0);
+    },
+    start(slot, player = 0) {
+      Module.web_start_game?.(slot == null ? -1 : slot | 0, player | 0);
+      // The overlay that drove this is done with the engine — hand it back.
+      pauseOwner = null;
+      applyPaused(false);
+    },
   };
 
   const devMenu: RsdkDevMenuBridge = {
@@ -381,13 +617,26 @@ export async function load(config: Rsdkv4LoadConfig): Promise<Rsdkv4Instance> {
   // the rAF loop and returns via a benign unwind Emscripten swallows.
   Module.callMain(['UsingCWD']);
 
+  // callMain only *schedules* the loop: Engine::Init runs on the first frame, and
+  // until it has, there is no game config, stage list or saveRAM to read. Waiting
+  // here means a host can call devMenu/game getters the moment load() resolves.
+  await waitForEngine(Module);
+
   focusCanvas();
+
+  // The engine writes SData.bin at its own pace (new game, checkpoint, options
+  // change), so copy it out on a slow timer as well as on the way down.
+  const saveTimer = mirrorSaves
+    ? setInterval(() => void persistSaveData(Module, storageNamespace, workDir), 10_000)
+    : null;
+
   emit({ type: 'ready' });
 
   return {
     start() {},
-    pause() { setPaused(true); },
-    resume() { setPaused(false); },
+    /** `owner` lets a pause overlay avoid resuming a game something else paused. */
+    pause(owner: string = 'host') { pauseWith(owner); },
+    resume(owner: string = 'host') { resumeFrom(owner); },
     reset() {
       throw new Error('rsdkv4: reset() is not supported — destroy() and load() again');
     },
@@ -397,8 +646,15 @@ export async function load(config: Rsdkv4LoadConfig): Promise<Rsdkv4Instance> {
       }
     },
     destroy() {
+      if (saveTimer !== null) clearInterval(saveTimer);
+      // Last chance to keep whatever the player earned this session.
+      if (mirrorSaves) void persistSaveData(Module, storageNamespace, workDir);
+
       try { Module.pauseMainLoop?.(); } catch { /* noop */ }
       try { setPaused(true); } catch { /* noop */ }
+      // Freezing the loop does not silence the audio callback — without this the
+      // music kept playing after the host went back to its launcher.
+      stopAudio();
 
       canvas.removeEventListener('contextmenu', swallowContextMenu);
       canvas.removeEventListener('pointerdown', onPointerDown);
@@ -408,6 +664,7 @@ export async function load(config: Rsdkv4LoadConfig): Promise<Rsdkv4Instance> {
       if (ownsCanvas) canvas.remove();
     },
     devMenu,
+    game,
     persistent,
     storageNamespace,
     purgeStorage() {

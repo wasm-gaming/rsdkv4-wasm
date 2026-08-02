@@ -34,6 +34,7 @@
 
   <script type="module">
     import demo from './demo/demo.js'
+    import { mountStartScreens } from './start-screens.js'
 
     // src/demo/library.ts, published on window by demo.js above. It owns the two
     // Data.rsdk slots in OPFS (rsdkv4/Sonic1/, rsdkv4/Sonic2/) and the launcher
@@ -43,13 +44,84 @@
     // page boots twice (once with the default config).
     const library = window.rsdkv4Library
 
-    // Pause overlay config. `optionGroups` is handed over as a stable array the
-    // template keeps by reference: the engine's stage list only exists once the
-    // engine has initialised (Engine.Init runs on the first frame, after
-    // SDK.load resolves), so we fill this in the first time the menu opens.
-    // Title is mutated on launch so the overlay is named after the game running.
-    const stageGroups = []
-    const escMenu = { enabled: true, optionGroups: stageGroups }
+    // Pause overlay config. Both `title` and `optionGroups` are filled in on
+    // launch, before the handler returns — the template reads them right after,
+    // when it mounts the overlay.
+    const escMenu = { enabled: true }
+
+    /**
+     * The pause overlay's rows, built from the running engine.
+     *
+     * "Jump to" is deliberately short: the full stage list is 30+ scenes, and
+     * what a player actually wants from a pause menu is the way out (title
+     * screen), the game's own pickers (stage menu / level select) and the
+     * special stages. Everything is looked up by name in the engine's real
+     * stage list, so a pack that names things differently simply drops the rows
+     * it doesn't have rather than warping somewhere random.
+     */
+    function buildEscMenuGroups(instance) {
+      const lists = instance.devMenu.getStageList()
+      const find = (listIdx, name) => {
+        const stages = lists[listIdx]?.stages ?? []
+        const index = stages.findIndex((stage) => stage.name.trim().toUpperCase() === name)
+        return index < 0 ? null : { value: `${listIdx}:${index}`, label: stages[index].name }
+      }
+
+      // 0 = presentation, 1 = regular, 3 = special (STAGELIST_* in Scene.hpp).
+      const screens = [find(0, 'TITLE SCREEN'), find(1, 'STAGE MENU'), find(0, 'LEVEL SELECT')].filter(Boolean)
+      const specials = (lists[3]?.stages ?? []).map((stage, index) => ({
+        value: `3:${index}`,
+        label: String(index + 1),
+      }))
+
+      const jumpTo = []
+      if (screens.length) {
+        jumpTo.push({
+          key: 'screen',
+          label: 'Screen',
+          description: 'Warp to one of the game’s own screens. Applies when you close this menu.',
+          type: 'enum',
+          value: null,
+          values: screens,
+        })
+      }
+      if (specials.length) {
+        jumpTo.push({
+          key: 'special',
+          label: 'Special stage',
+          description: 'Drop straight into a special stage.',
+          type: 'enum',
+          value: null,
+          values: specials,
+        })
+      }
+
+      // The engine's own GAME OPTIONS screen — spindash, speed caps, item boxes,
+      // super forms — as live values. Sonic 1 and Sonic 2 expose different ones.
+      const gameOptions = instance.game.options().map((option) => ({
+        key: `opt:${option.key}`,
+        label: option.label,
+        description: 'RSDKv4 game option. Saved with the game, exactly as the engine’s own menu saves it.',
+        type: option.type,
+        value: option.type === 'boolean' ? Boolean(option.value) : option.value,
+        ...(option.values
+          ? { values: option.values.map((label, index) => ({ value: index, label })) }
+          : {}),
+      }))
+
+      const groups = []
+      if (jumpTo.length) groups.push({ id: 'jump', label: 'Jump to', options: jumpTo })
+      if (gameOptions.length) groups.push({ id: 'game', label: 'Game options', options: gameOptions })
+      return groups
+    }
+
+    const startScreens = { mount: mountStartScreens }
+
+    // Logos for the save-select screen (src/demo/assets, copied to dist/assets
+    // by the Makefile). A game without one just gets its name in type.
+    const GAME_LOGOS = {
+      Sonic1: './assets/Sonic_The_Hedgehog.svg',
+    }
 
     demo
       .init({
@@ -97,6 +169,9 @@
           // read from JS instead. That path is the one in use right now.
           storageNamespace: library.storageNamespace(game.id),
           dataProvider: () => library.readBytes(game.id),
+          // The save-slot and character screens are drawn in HTML below, so the
+          // engine's own text menus are switched off.
+          options: { skipStartMenu: true },
           onEvent(event) {
             if (event.type === 'error') {
               console.error(event.error)
@@ -106,42 +181,46 @@
 
         instance.start()
 
-        // The overlay's rows are the engine's own stage list, read through the
-        // RSDKv4 dev-menu bridge (WebDevMenu.cpp) — picking one warps the game
-        // exactly like the native Dev Menu would. The template's stock rows
-        // (image filtering, aspect ratio, audio…) are placeholders from its
-        // generic-emulator config and are not wired to anything in RSDKv4, so
-        // we replace them rather than show controls that do nothing.
+        // The pause overlay's rows are the engine's, not the template's. The
+        // stock ones (image filtering, aspect ratio, audio…) come from its
+        // generic-emulator config and are wired to nothing in RSDKv4, so they
+        // are replaced rather than shown as controls that do nothing:
+        //   · "Jump to" — warps, via the dev-menu bridge (WebDevMenu.cpp)
+        //   · "Game options" — the engine's own GAME OPTIONS screen, read and
+        //     written through instance.game (WebGame.cpp), same globals and
+        //     same save file the native menu uses.
         escMenu.onOptionChange = (key, value) => {
-          const match = /^stage:(\d+)$/.exec(key)
-          if (!match) return
-          instance.devMenu.loadStage(Number(match[1]), Number(value))
-          // The engine is paused while the menu is open, so the warp happens on
-          // resume — closing the overlay is what starts the new stage.
+          if (key === 'screen' || key === 'special') {
+            const [list, stage] = String(value).split(':').map(Number)
+            instance.devMenu.loadStage(list, stage)
+            // The engine is paused while the menu is open, so the warp lands on
+            // resume — closing the overlay is what starts the new stage.
+            return
+          }
+          const option = key.startsWith('opt:') ? key.slice(4) : null
+          if (option) instance.game.setOption(option, value === true ? 1 : value === false ? 0 : Number(value))
         }
+
+        escMenu.optionGroups = buildEscMenuGroups(instance)
+
+        // One save-select screen — file and character in the same place —
+        // instead of the engine's own text menus (which is why it boots with
+        // skipStartMenu). It pauses the engine while it is up and starts the
+        // game on the way out.
+        startScreens.mount(e.attachTo, instance, {
+          title: game.title,
+          logo: GAME_LOGOS[game.id],
+        })
 
         return instance
       })
+      // Pause ownership: the overlay pauses as 'menu', so closing it will not
+      // resume a game that something else (the start screens, a host pause) had
+      // already frozen. Only the owner of a pause can lift it.
       .on('esc', ({ open, instance }) => {
-        if (!open || stageGroups.length || !instance) return
-
-        // Category index must survive the filter — it is what loadStage() takes.
-        const options = instance.devMenu
-          .getStageList()
-          .map((category, index) => ({
-            key: `stage:${index}`,
-            label: category.name,
-            description: `Warp to a scene in ${category.name}. RSDKv4 stage list, straight from the game's GameConfig.`,
-            type: 'enum',
-            value: null,
-            values: category.stages.map((stage, stageIndex) => ({
-              value: stageIndex,
-              label: stage.name,
-            })),
-          }))
-          .filter((option) => option.values.length > 0)
-
-        if (options.length) stageGroups.push({ id: 'stages', label: 'Stage select', options })
+        if (!instance) return
+        if (open) instance.pause('menu')
+        else instance.resume('menu')
       })
   </script>
 </body>

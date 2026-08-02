@@ -28,6 +28,12 @@ class CoopCoepHandler(SimpleHTTPRequestHandler):
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
         self.send_header("Cross-Origin-Resource-Policy", "cross-origin")
+        # Never let the browser reuse a build. Without this the default handler
+        # sends only Last-Modified, browsers cache heuristically, and a rebuilt
+        # rsdkv4.wasm (10 MB, very tempting to keep) can go on running the old
+        # code after `make build` — with the page looking merely broken rather
+        # than stale. A dev server should always hand back what is on disk.
+        self.send_header("Cache-Control", "no-store, max-age=0")
         super().end_headers()
 
 

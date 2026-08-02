@@ -213,11 +213,32 @@ void web_devmenu_set_paused(bool paused)
     Engine.masterPaused = paused;
 }
 
+// --- audio ------------------------------------------------------------------
+// masterPaused freezes the logic loop but not the audio callback, so pausing
+// through the dev-menu bridge alone left music playing over the HTML overlay
+// (and kept playing after the host tore the instance down).
+
+void web_audio_set_paused(bool paused)
+{
+    if (paused)
+        PauseSound();
+    else
+        ResumeSound();
+}
+
+void web_audio_stop()
+{
+    StopMusic();
+    StopAllSfx();
+}
+
 EMSCRIPTEN_BINDINGS(web_devmenu)
 {
     emscripten::function("web_devmenu_get_stage_list", &web_devmenu_get_stage_list);
     emscripten::function("web_devmenu_load_stage", &web_devmenu_load_stage);
     emscripten::function("web_devmenu_set_paused", &web_devmenu_set_paused);
+    emscripten::function("web_audio_set_paused", &web_audio_set_paused);
+    emscripten::function("web_audio_stop", &web_audio_stop);
 }
 EOF
 
@@ -231,6 +252,303 @@ with open(path, "r", encoding="utf-8") as f:
 anchor = "          RSDKv4/Userdata.cpp      \\\n"
 assert content.count(anchor) == 1, "expected exactly one Userdata.cpp SOURCES line"
 content = content.replace(anchor, anchor + "          RSDKv4/WebDevMenu.cpp   \\\n", 1)
+
+with open(path, "w", encoding="utf-8") as f:
+    f.write(content)
+PYEOF
+
+echo "Adding WebGame.cpp (embind bridge for the HTML start-menu overlay)..."
+cat << 'EOF' > "$WORK_DIR/RSDKv4/WebGame.cpp"
+// Bridges RSDKv4's native Start Menu — Debug.cpp's STARTMENU_SAVESEL,
+// STARTMENU_PLAYERSEL and STARTMENU_GAMEOPTS handlers — to JS, so a host can
+// replace those in-canvas screens with its own UI.
+//
+// The save/player logic below mirrors Debug.cpp move for move: same globals, the
+// same saveRAM layout, the same InitStartingStage() calls. A game started from
+// HTML therefore lands in exactly the state the engine's own menu would produce.
+#include "RetroEngine.hpp"
+#include <emscripten/bind.h>
+#include <sstream>
+#include <string>
+
+namespace {
+
+// One save slot is 8 ints of saveRAM (Debug.cpp, STARTMENU_SAVESEL):
+enum SaveField {
+    SAVE_CHARACTER = 0, // 0 Sonic, 1 Tails, 2 Knuckles, 3 Sonic & Tails
+    SAVE_LIVES,
+    SAVE_SCORE,
+    SAVE_BONUS,
+    SAVE_ZONE,      // 1-based next zone; 0 = unused slot; >127 = special stage
+    SAVE_EMERALDS,
+    SAVE_SPECIALPOS,
+};
+
+std::string esc(const char *s)
+{
+    std::string out;
+    for (const char *p = s; *p; ++p) {
+        if (*p == '"' || *p == '\\')
+            out += '\\';
+        out += *p;
+    }
+    return out;
+}
+
+// Game options differ per game, exactly as initStartMenu()/STARTMENU_GAMEOPTS
+// split them. `store` is the saveRAM cell the engine persists the value in.
+struct GameOption {
+    const char *key;
+    const char *label;
+    const char *global;
+    int store;
+    bool isEnum;
+};
+
+const GameOption S1_OPTIONS[] = {
+    { "spindash", "Spindash", "options.spindash", 0x101, false },
+    { "speedCap", "Ground speed cap", "options.speedCap", 0x102, false },
+    { "airSpeedCap", "Air speed cap", "options.airSpeedCap", 0x103, false },
+    { "spikeBehavior", "S1 spikes", "options.spikeBehavior", 0x104, false },
+    { "shieldType", "Item type", "options.shieldType", 0x105, true },
+    { "superStates", "Super forms", "options.superStates", 0x106, false },
+};
+
+const GameOption S2_OPTIONS[] = {
+    { "airSpeedCap", "Air speed cap", "options.airSpeedCap", 0x101, false },
+    { "tailsFlight", "Tails flight", "options.tailsFlight", 0x102, false },
+    { "superTails", "Super Tails", "options.superTails", 0x103, false },
+    { "spikeBehavior", "S1 spikes", "options.spikeBehavior", 0x104, false },
+    { "shieldType", "Item type", "options.shieldType", 0x105, true },
+};
+
+const char *S1_ITEM_TYPES[] = { "S1", "S2", "S1+S3", "S2+S3" };
+const char *S2_ITEM_TYPES[] = { "S2", "S2+S3", "RANDOM", "RANDOM+S3" };
+
+const GameOption *optionTable(int *count)
+{
+    if (Engine.gameType == GAME_SONIC2) {
+        *count = sizeof(S2_OPTIONS) / sizeof(S2_OPTIONS[0]);
+        return S2_OPTIONS;
+    }
+    *count = sizeof(S1_OPTIONS) / sizeof(S1_OPTIONS[0]);
+    return S1_OPTIONS;
+}
+
+} // namespace
+
+// True once Engine::Init has run (first frame): before that there is no game
+// config, no stage list and no saveRAM, so every getter below is meaningless.
+bool web_engine_ready() { return Engine.initialised; }
+
+// 1 = Sonic 1, 2 = Sonic 2, 0 = unknown (Engine::Init sniffs the window title).
+int web_game_type() { return Engine.gameType; }
+
+// Playable characters, from the pack's GameConfig player list.
+std::string web_get_players()
+{
+    static TextMenu menu;
+    SetupTextMenu(&menu, 0);
+    LoadConfigListText(&menu, 0);
+
+    std::ostringstream json;
+    json << "[";
+    for (int i = 0; i < menu.rowCount; ++i) {
+        std::string name;
+        for (int c = 0; c < menu.entrySize[i]; ++c) name += (char)menu.textData[menu.entryStart[i] + c];
+        if (i)
+            json << ",";
+        json << "\"" << esc(name.c_str()) << "\"";
+    }
+    json << "]";
+    return json.str();
+}
+
+// The four save slots. `zone` is a 0-based index into the stage list named by
+// `list` (1 = regular, 3 = special), or -1 for an unused slot.
+std::string web_get_save_slots()
+{
+    std::ostringstream json;
+    json << "[";
+    for (int slot = 0; slot < 4; ++slot) {
+        const int base = slot << 3;
+        const int zone = saveRAM[base + SAVE_ZONE];
+        const bool special = zone > 127;
+        if (slot)
+            json << ",";
+        json << "{\"slot\":" << slot << ",\"empty\":" << (zone ? "false" : "true")
+             << ",\"character\":" << saveRAM[base + SAVE_CHARACTER]
+             << ",\"lives\":" << saveRAM[base + SAVE_LIVES] << ",\"score\":" << saveRAM[base + SAVE_SCORE]
+             << ",\"emeralds\":" << saveRAM[base + SAVE_EMERALDS]
+             << ",\"list\":" << (zone ? (special ? STAGELIST_SPECIAL : STAGELIST_REGULAR) : -1)
+             << ",\"zone\":" << (zone ? (special ? zone - 129 : zone - 1) : -1) << "}";
+    }
+    json << "]";
+    return json.str();
+}
+
+void web_delete_save(int slot)
+{
+    if (slot < 0 || slot > 3)
+        return;
+    const int base = slot << 3;
+    saveRAM[base + SAVE_CHARACTER] = 0;
+    saveRAM[base + SAVE_LIVES]     = 3;
+    saveRAM[base + SAVE_SCORE]     = 0;
+    saveRAM[base + SAVE_BONUS]     = 50000;
+    saveRAM[base + SAVE_ZONE]      = 0;
+    saveRAM[base + SAVE_EMERALDS]  = 0;
+    saveRAM[base + SAVE_SPECIALPOS] = 0;
+    saveRAM[base + 7]              = 0;
+    WriteSaveRAMData();
+}
+
+// Start a game the way the native menu does.
+//   slot 0..3 with data  → continue that save (jumps to its zone)
+//   slot 0..3 empty      → new game on that slot, as `player`
+//   slot < 0             → no-save mode, as `player`
+//
+// The one deliberate difference from Debug.cpp: no-save mode does not write
+// saveRAM. Upstream falls back to `savePos = 0` there and stamps slot 1 with a
+// fresh game — surprising when the player explicitly asked not to save.
+void web_start_game(int slot, int player)
+{
+    if (player < 0)
+        player = 0;
+
+    if (slot >= 0 && slot <= 3 && saveRAM[(slot << 3) + SAVE_ZONE]) {
+        const int base = slot << 3;
+        SetGlobalVariableByName("options.saveSlot", slot);
+        SetGlobalVariableByName("options.gameMode", 1);
+        SetGlobalVariableByName("options.stageSelectFlag", 0);
+        SetGlobalVariableByName("player.lives", saveRAM[base + SAVE_LIVES]);
+        SetGlobalVariableByName("player.score", saveRAM[base + SAVE_SCORE]);
+        SetGlobalVariableByName("player.scoreBonus", saveRAM[base + SAVE_BONUS]);
+        SetGlobalVariableByName("specialStage.emeralds", saveRAM[base + SAVE_EMERALDS]);
+        SetGlobalVariableByName("specialStage.listPos", saveRAM[base + SAVE_SPECIALPOS]);
+        SetGlobalVariableByName("stage.player2Enabled", saveRAM[base + SAVE_CHARACTER] == 3);
+        SetGlobalVariableByName("lampPostID", 0); // For S1
+        SetGlobalVariableByName("starPostID", 0); // For S2
+        SetGlobalVariableByName("options.vsMode", 0);
+
+        const int nextZone = saveRAM[base + SAVE_ZONE];
+        if (nextZone > 127) {
+            SetGlobalVariableByName("specialStage.nextZone", nextZone - 129);
+            InitStartingStage(STAGELIST_SPECIAL, saveRAM[base + SAVE_SPECIALPOS], saveRAM[base + SAVE_CHARACTER]);
+        }
+        else {
+            SetGlobalVariableByName("specialStage.nextZone", nextZone - 1);
+            InitStartingStage(STAGELIST_REGULAR, nextZone - 1, saveRAM[base + SAVE_CHARACTER]);
+        }
+        return;
+    }
+
+    const bool saving = slot >= 0 && slot <= 3;
+    if (saving) {
+        const int base = slot << 3;
+        saveRAM[base + SAVE_CHARACTER]  = player;
+        saveRAM[base + SAVE_LIVES]      = 3;
+        saveRAM[base + SAVE_SCORE]      = 0;
+        saveRAM[base + SAVE_BONUS]      = 50000;
+        saveRAM[base + SAVE_ZONE]       = 1;
+        saveRAM[base + SAVE_EMERALDS]   = 0;
+        saveRAM[base + SAVE_SPECIALPOS] = 0;
+        saveRAM[base + 7]               = 0;
+        SetGlobalVariableByName("options.gameMode", 1);
+        SetGlobalVariableByName("options.stageSelectFlag", 0);
+        SetGlobalVariableByName("options.saveSlot", slot);
+    }
+    else {
+        SetGlobalVariableByName("options.gameMode", 0);
+        SetGlobalVariableByName("options.saveSlot", 0);
+    }
+
+    SetGlobalVariableByName("player.lives", 3);
+    SetGlobalVariableByName("player.score", 0);
+    SetGlobalVariableByName("player.scoreBonus", 50000);
+    SetGlobalVariableByName("specialStage.emeralds", 0);
+    SetGlobalVariableByName("specialStage.listPos", 0);
+    SetGlobalVariableByName("stage.player2Enabled", player == 3);
+    SetGlobalVariableByName("lampPostID", 0); // For S1
+    SetGlobalVariableByName("starPostID", 0); // For S2
+    SetGlobalVariableByName("options.vsMode", 0);
+
+    if (saving)
+        WriteSaveRAMData();
+
+    // Presentation/0 is the title screen: the engine's own new-game path goes
+    // through it, and its script is what walks on into zone 1.
+    InitStartingStage(STAGELIST_PRESENTATION, 0, player);
+}
+
+// The engine's GAME OPTIONS screen, as data.
+std::string web_get_game_options()
+{
+    int count               = 0;
+    const GameOption *table = optionTable(&count);
+    const char **itemTypes  = Engine.gameType == GAME_SONIC2 ? S2_ITEM_TYPES : S1_ITEM_TYPES;
+
+    std::ostringstream json;
+    json << "[";
+    for (int i = 0; i < count; ++i) {
+        if (i)
+            json << ",";
+        json << "{\"key\":\"" << table[i].key << "\",\"label\":\"" << esc(table[i].label)
+             << "\",\"value\":" << GetGlobalVariableByName(table[i].global) << ",\"type\":\""
+             << (table[i].isEnum ? "enum" : "boolean") << "\"";
+        if (table[i].isEnum) {
+            json << ",\"values\":[";
+            for (int v = 0; v < 4; ++v) {
+                if (v)
+                    json << ",";
+                json << "\"" << esc(itemTypes[v]) << "\"";
+            }
+            json << "]";
+        }
+        json << "}";
+    }
+    json << "]";
+    return json.str();
+}
+
+// Write-through, same as the engine's own options screen: global + saveRAM.
+void web_set_game_option(std::string key, int value)
+{
+    int count               = 0;
+    const GameOption *table = optionTable(&count);
+    for (int i = 0; i < count; ++i) {
+        if (key != table[i].key)
+            continue;
+        SetGlobalVariableByName(table[i].global, value);
+        saveRAM[table[i].store] = value;
+        WriteSaveRAMData();
+        return;
+    }
+}
+
+EMSCRIPTEN_BINDINGS(web_game)
+{
+    emscripten::function("web_engine_ready", &web_engine_ready);
+    emscripten::function("web_game_type", &web_game_type);
+    emscripten::function("web_get_players", &web_get_players);
+    emscripten::function("web_get_save_slots", &web_get_save_slots);
+    emscripten::function("web_delete_save", &web_delete_save);
+    emscripten::function("web_start_game", &web_start_game);
+    emscripten::function("web_get_game_options", &web_get_game_options);
+    emscripten::function("web_set_game_option", &web_set_game_option);
+}
+EOF
+
+echo "Registering WebGame.cpp in the Makefile SOURCES list..."
+python3 - "$WORK_DIR/Makefile" <<'PYEOF'
+import sys
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as f:
+    content = f.read()
+
+anchor = "          RSDKv4/Userdata.cpp      \\\n"
+assert content.count(anchor) == 1, "expected exactly one Userdata.cpp SOURCES line"
+content = content.replace(anchor, anchor + "          RSDKv4/WebGame.cpp      \\\n", 1)
 
 with open(path, "w", encoding="utf-8") as f:
     f.write(content)

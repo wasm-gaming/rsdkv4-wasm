@@ -54,12 +54,66 @@ The launcher decides how Escape behaves and draws its own overlay. It should
 intercept Escape in the **capture phase** if it wants to repurpose it (the engine
 ships with `DevMenu=false`, so the native in-canvas menu stays suppressed).
 
+> ⚠️ A capture-phase listener on `window` that calls `stopPropagation()` also
+> stops the **bubble**-phase listener SDL registers there — i.e. it takes the
+> keyboard away from the game. Swallow only the keys you actually handle, and
+> only while your overlay is open. (This is exactly how the shared demo
+> template's pause menu used to kill the d-pad; see
+> [src/demo/components/esc-menu.html](src/demo/components/esc-menu.html).)
+
+### Start menu — the host can own that too
+`instance.game` exposes RSDKv4's Start Menu as data (the `web_*` embind functions
+in `WebGame.cpp`), so a host can draw its own save / character / options screens
+instead of the engine's in-canvas text menus. The logic mirrors
+`Debug.cpp` move for move — same globals, same `saveRAM`, same
+`InitStartingStage()` — so a game started this way lands in the state the native
+menu would have produced.
+
+```js
+const engine = await load({ canvas, assets: { data },
+  options: { skipStartMenu: true },     // hide the engine's own screens
+});
+
+engine.game.type();          // 1 = Sonic 1, 2 = Sonic 2
+engine.game.players();       // ["SONIC", "TAILS", "KNUCKLES", "SONIC AND TAILS"]
+engine.game.saveSlots();     // [{ slot, empty, character, lives, score, emeralds, list, zone }]
+engine.game.start(0, 1);     // slot 0 as Tails — a slot with data resumes it
+engine.game.start(null, 0);  // no-save mode
+engine.game.deleteSave(2);
+
+engine.game.options();               // the engine's GAME OPTIONS screen, as data
+engine.game.setOption('spindash', 1); // written through to the game's save file
+```
+
+`load()` resolves only once `Engine::Init` has run, so all of the above is safe to
+call the moment it returns. The demo's [start-screens.ts](src/demo/start-screens.ts)
+is a worked example.
+
+### Pausing has an owner
+`pause(owner?)` / `resume(owner?)` — the **first** caller to pause owns it, and only
+that owner's `resume()` lifts it. A pause overlay therefore can't resume a game a
+start screen (or the host) had already frozen:
+
+```js
+engine.pause('menu');     // overlay opens
+engine.resume('menu');    // …closes: only resumes if 'menu' was the one that paused
+```
+
+Pausing stops the **audio** too: `masterPaused` only freezes the logic loop, so
+without that the music kept playing over the overlay — and `destroy()` kept
+playing it after the host returned to its launcher.
+
 ### Options
 Engine-specific options are described in [src/rsdkv4.options.ts](src/rsdkv4.options.ts)
 (`Rsdkv4Options` type + `RSDKV4_OPTIONS_SCHEMA`, mirrored into
 [src/rsdkv4.manifest.ts](src/rsdkv4.manifest.ts)'s `options`). When the host doesn't pass an explicit
 `settings` asset, the SDK **generates `settings.ini` from `config.options`**
-(`devMenu`, `engineDebugMode`, `vsync`, `startingCategory/Scene/Player`).
+(`devMenu`, `engineDebugMode`, `vsync`, `skipStartMenu`,
+`startingCategory/Scene/Player`).
+
+> `startingCategory/Scene/Player` default to **255 = unset**, which is what the
+> engine reads as "boot normally". Any other value — *including 0* — makes
+> `Engine::Init` skip the start-menu flow and force that stage.
 
 ### Other niceties
 - **Canvas id guard** — forces `canvas.id = "canvas"` because Emscripten's SDL2
@@ -115,6 +169,16 @@ engine will use as its working dir and then load with
 the file already persisted and skips the copy. That is what this repo's demo does
 (see [Try it locally](#try-it-locally)); it keeps one copy of a ~40 MB pack instead
 of two, and the game's save data lands next to it in the same folder.
+
+### Save data survives even without the mount
+The engine writes its save file (`SData.bin`) into the working dir, which is
+in-memory on every build that can't mount OPFS — so game saves would die with the
+page and every slot would read "NEW GAME" forever. The *host* side of OPFS has no
+such limitation (the plain async API works on any main thread), so the SDK
+mirrors that one file itself: it copies any stored `SData.bin` into the working
+dir before the engine boots, and copies it back out on pause, on `destroy()`, and
+every 10s in between. Saves therefore persist per `storageNamespace` even while
+the working dir does not. `persist: null` turns the mirror off with everything else.
 
 ### Skip re-fetch when already persisted
 When the working dir is OPFS-backed, the SDK checks whether `/data/Data.rsdk`
@@ -206,7 +270,10 @@ dist/
 ├── index.html            # demo shell (import map → ./rsdkv4/rsdkv4.sdk.js)
 ├── demo.js               # window.SDK + window.rsdkv4Library
 ├── library.js            # the two-game OPFS library (src/demo/library.ts)
-├── demo/                 # shared template (engine-specs), launcher.html replaced
+├── start-screens.js      # save-select screen (src/demo/start-screens.ts)
+├── assets/               # demo artwork (game logos), from src/demo/assets/
+├── demo/                 # shared template (engine-specs); launcher.html and
+│                         #   esc-menu.html replaced by our own copies
 ├── settings.ini          # seeded from src/settings.default.ini if absent
 └── Data.rsdk             # unused by the demo; kept for manual experiments
 ```
@@ -244,10 +311,33 @@ deletes only `Data.rsdk`, leaving settings and saves for when it comes back.
 A page that isn't cross-origin isolated can't reach OPFS from WASM (see the caveat
 above), so the SDK falls back to an in-memory working dir and pulls the bytes
 through `dataProvider()` — the library serves them from the same stored copy, so
-the games still launch, they just don't persist their saves.
+the games still launch. Saves still survive, through the
+[save-data mirror](#save-data-survives-even-without-the-mount).
+
+### The game's own menus, in HTML
+
+Launching goes straight to a **save-select screen** — the demo's, not the engine's
+(it boots with `skipStartMenu: true`). It is laid out like Sonic Mania's: a row of
+portrait cards, status on top, character in the middle, chaos emeralds along the
+bottom, `NO SAVE` first. File and character are the *same* choice — a used file
+starts as its saved character, an empty one offers the playable characters on the
+card itself — so starting a game is one click. Everything but the game logo
+(`src/demo/assets/`) is drawn in CSS, and it drives the engine through
+`instance.game`, so the resulting game is the same one the native text menus
+would have started.
+
+**Escape** opens the pause overlay, which pauses the engine *and its music* and
+shows only what RSDKv4 can actually do live:
+
+- **Jump to** — title screen, the game's stage menu, level select, special stages 1-8
+- **Game options** — the engine's own GAME OPTIONS (spindash, speed caps, S1
+  spikes, item box set, super forms), read and written through the same globals
+  and save file the native screen uses
 
 The pieces: [src/demo/library.ts](src/demo/library.ts) (storage),
+[src/demo/start-screens.ts](src/demo/start-screens.ts) (save select),
 [src/demo/components/launcher.html](src/demo/components/launcher.html) (the slots),
+[src/demo/components/esc-menu.html](src/demo/components/esc-menu.html) (pause overlay),
 [src/demo/index.html](src/demo/index.html) (wiring to `SDK.load`).
 
 ## Live demo (GitHub Pages)
