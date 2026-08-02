@@ -7,8 +7,10 @@ import { RSDKV4_OPTIONS_SCHEMA } from './rsdkv4.options.js';
 
 export const manifest: EngineManifest = {
   id: 'rsdkv4',
-  version: '0.1.0',
+  version: '0.1.3',
   name: 'Retro Software Development Kit v4',
+  description:
+    'RSDKv4 compiled to WebAssembly via Emscripten. One game-agnostic WASM binary runs both Sonic 1 and Sonic 2 — the difference is only which Data.rsdk the host supplies at runtime. Ships none of the game: the player provides their own Data.rsdk, and it never leaves their browser.',
   artifacts: {
     // Relative to the manifest (dist/manifest.json); the engine files live in
     // the dist/rsdkv4/ subfolder.
@@ -35,7 +37,18 @@ export const manifest: EngineManifest = {
         'Engine settings. Omitted → the SDK generates one from config.options.',
     },
   ],
-  input: 'rsdkv4',
+  // RSDKv4 keyboard defaults. The key names are KeyboardEvent.code values.
+  input: {
+    up: 'ArrowUp',
+    down: 'ArrowDown',
+    left: 'ArrowLeft',
+    right: 'ArrowRight',
+    a: 'KeyZ',
+    b: 'KeyX',
+    c: 'KeyC',
+    start: 'Enter',
+    select: 'ShiftLeft',
+  },
   video: { baseWidth: 424, baseHeight: 240, aspect: '16:9' },
   options: RSDKV4_OPTIONS_SCHEMA,
   capabilities: { saveStates: false, sram: false, coreSelectable: false },

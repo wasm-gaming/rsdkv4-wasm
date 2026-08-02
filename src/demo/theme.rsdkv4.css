@@ -1,0 +1,10 @@
+/* RSDKv4 theme overrides for the shared demo template.
+ * Loaded after demo.css to customise colours and branding for Sonic games. */
+
+:root {
+  --accent: #0066ff;
+  --accent-hover: #3388ff;
+  --accent-glow: rgba(0, 102, 255, 0.25);
+  --bg: #0a0a12;
+  --surface: #14141e;
+}

@@ -1,26 +1,35 @@
-
 name: Build
 
-# Builds the TypeScript SDK (on a Node runner) and the game-agnostic RSDKv4 WASM
-# (inside an emscripten/emsdk container job — build.sh runs there directly, no
-# `docker run`). On tags it merges both into a Release; on main / manual runs it
-# publishes the demo (dist/) to GitHub Pages.
-
+# Builds the two halves of a release and leaves them as artifacts. What
+# happens to them afterwards — Release assets, npm, Pages — belongs to
+# release.yml, which calls this workflow.
 on:
   push:
     branches:
       - main
-    tags:
-      - 'v*'
+  pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: >-
+          Version to stamp across package.json and the manifest before building.
+          Blank builds whatever the checkout says, which is what a PR wants.
+        type: string
+        default: ''
 
 permissions:
-  contents: write
+  contents: read
 
-# Serialize Pages deployments (don't cancel an in-progress one).
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  # `github.workflow` is the *caller's* name when this runs through
+  # workflow_call, so a release building main lands in its own group instead of
+  # queueing behind whatever the last push to main is still compiling.
+  #
+  # Only pull requests get cancelled. A release build is doing work nothing else
+  # will redo, and on main the pushes are minutes apart at most.
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   sdk:
@@ -30,14 +39,32 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: npm
+      # Stamp the release version into package.json + manifest before building,
+      # so the artifacts carry the version that is about to be tagged.
+      - name: Stamp the release version
+        if: inputs.version != ''
+        run: node scripts/sync-version.mjs "${{ inputs.version }}"
       - name: Install dependencies
-        run: npm install
-      - name: Build SDK (TypeScript)
+        run: npm ci
+      - name: Build SDK (TypeScript + manifest + demo shell)
         run: make build-sdk
+      - name: Typecheck
+        run: make typecheck
+
+      # Packed here, where the version is already stamped and dist/ is on disk,
+      # so the bytes that get published are the bytes that were tested.
+      - name: Pack
+        run: npm pack
+
       - uses: actions/upload-artifact@v4
         with:
           name: sdk-dist
           path: dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarball
+          path: '*.tgz'
 
   wasm:
     runs-on: ubuntu-latest
@@ -52,64 +79,3 @@ jobs:
         with:
           name: wasm-dist
           path: dist/
-
-  release:
-    needs: [sdk, wasm]
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: sdk-dist
-          path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: wasm-dist
-          path: dist
-      - name: Attach to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/rsdkv4/rsdkv4.js
-            dist/rsdkv4/rsdkv4.wasm
-            dist/rsdkv4/rsdkv4.sdk.js
-            dist/rsdkv4/rsdkv4.sdk.d.ts
-            dist/rsdkv4/rsdkv4.options.js
-            dist/rsdkv4/rsdkv4.options.d.ts
-            dist/rsdkv4/rsdkv4.manifest.js
-            dist/rsdkv4/rsdkv4.manifest.d.ts
-            dist/manifest.json
-            dist/index.html
-            dist/demo.js
-
-  # Publish the demo (dist/) to GitHub Pages. No Data.rsdk ships (git-ignored), so
-  # the live demo shows the pick/drag-and-drop fallback. NOTE: GitHub Pages can't
-  # send COOP/COEP headers, so the page is not cross-origin isolated → OPFS won't
-  # engage and the SDK uses the in-memory WASMFS backend.
-  pages:
-    needs: [sdk, wasm]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: sdk-dist
-          path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: wasm-dist
-          path: dist
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
-      - id: deploy
-        uses: actions/deploy-pages@v4

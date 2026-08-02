@@ -1,105 +1,188 @@
-
 name: Release
+
+# Cuts a release, start to finish: work out the next version, build everything
+# with it, and only then write the bump into git and hand the artifacts out.
+#
+#   guard → next → build → bump → { release, npm, pages }
+#
+# The order is the point. The version is stamped into the tree the build job
+# clones rather than committed ahead of it, so `main` never carries a bump for a
+# build that failed — and the artifacts still come out carrying the version that
+# is about to be tagged.
 
 on:
   workflow_dispatch:
     inputs:
-      bump:
-        description: Version bump type
-        required: true
+      version:
+        description: 'Version bump to apply'
         type: choice
-        options:
-          - patch
-          - minor
-          - major
+        options: [patch, minor, major]
+        default: patch
+      dry-run:
+        description: 'Build and pack without pushing, releasing or publishing'
+        type: boolean
+        default: true
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
-  release:
+  # `workflow_dispatch` takes no branch filter — the workflow can be launched
+  # from any branch that carries this file — and a release built from a work
+  # branch would push a bump commit onto it.
+  guard:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    # Must match the Environment set on the npm trusted publisher (production),
-    # otherwise the OIDC environment claim mismatches and publish 404s.
-    environment: production
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Releases are cut from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "refusing to release from ${{ github.ref }}" >&2
+          exit 1
+
+  next:
+    needs: [guard]
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      # Resolves the keyword against package.json and nothing more — the tree it
+      # writes is thrown away with the runner.
+      - id: next
+        run: |
+          version="$(npm version "${{ inputs.version }}" --no-git-tag-version)"
+          echo "version=${version#v}" >> "$GITHUB_OUTPUT"
+          echo "next version: ${version#v}"
+
+  build:
+    needs: [next]
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.next.outputs.version }}
+
+  bump:
+    needs: [next, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          node scripts/sync-version.mjs "${{ needs.next.outputs.version }}"
+          git add package.json package-lock.json src/rsdkv4.manifest.ts
+          git commit -m "v${{ needs.next.outputs.version }}"
+          git tag "v${{ needs.next.outputs.version }}"
+      # Not a fast-forward if someone merged while the build ran, in which case
+      # this fails rather than overwriting them. Relaunching is the fix.
+      - name: Push
+        if: inputs.dry-run != true
+        run: git push --follow-tags
+
+  release:
+    needs: [next, build, bump]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+          name: sdk-dist
+          path: dist
+      - uses: actions/download-artifact@v4
         with:
-          node-version: 24
-          cache: npm
-          scope: '@wasm-gaming'
-          registry-url: https://registry.npmjs.org
+          name: wasm-dist
+          path: dist
 
-      - name: Upgrade npm for OIDC trusted publishing
-        # Trusted publishing (tokenless OIDC) requires npm >= 11.5.1.
-        # Node 24 already ships npm 11.x; upgrade to latest to be safe.
+      - name: Pack the site
         run: |
-          npm install -g npm@latest
-          npm --version
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Validate
-        run: |
-          make typecheck
-          make test
-
-      - name: Build (SDK + WASM + manifest)
-        # Full build so the tarball actually contains dist/rsdkv4/rsdkv4.{js,wasm}
-        # and dist/manifest.json. `make test` only runs build-lib (SDK .js/.d.ts),
-        # which is why those artifacts were missing from the pack.
-        run: make build
-
-      - name: Configure Git
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email github-actions[bot]@users.noreply.github.com
-
-      - name: Bump version, commit, and tag
-        id: bump_version
-        run: |
-          NEW_TAG=$(npm version "${{ inputs.bump }}" -m "chore(release): %s")
-          echo "new_tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
-
-      - name: npm publish preflight
-        run: |
-          npm config get registry
-          npm pack --dry-run
-
-      - name: Publish to npm
-        run: npm publish --provenance --access public
-
-      - name: Push commit and tag
-        run: git push origin HEAD --follow-tags
-
-      - name: Package dist archives
-        # Bundle the built dist/ (SDK + WASM + manifest) as release assets.
-        # Both archives contain a top-level rsdkv4/ directory.
-        run: |
-          cp -r dist rsdkv4
+          cp -R dist rsdkv4
           tar -czf rsdkv4.tar.gz rsdkv4
-          zip -r rsdkv4.zip rsdkv4
+          zip -qr rsdkv4.zip rsdkv4
+          ls -la rsdkv4.tar.gz rsdkv4.zip
 
-      - name: Create GitHub release
+      - name: Attach artifacts to Release
+        if: inputs.dry-run != true
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.bump_version.outputs.new_tag }}
-          name: ${{ steps.bump_version.outputs.new_tag }}
+          tag_name: v${{ needs.next.outputs.version }}
           generate_release_notes: true
           files: |
             rsdkv4.tar.gz
             rsdkv4.zip
+
+  npm:
+    needs: [build, bump]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Trusted publishing: npm mints the token from this run's OIDC identity.
+      id-token: write
+    environment: production
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-tarball
+
+      - name: Check the tarball publishes
+        run: npm publish ./*.tgz --access public --dry-run
+
+      - name: Publish
+        if: inputs.dry-run != true
+        run: npm publish ./*.tgz --access public --provenance
+
+  pages:
+    needs: [build, bump]
+    if: inputs.dry-run != true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-dist
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm-dist
+          path: dist
+
+      - name: Check the site is laid out the way the page loads it
+        run: |
+          set -e
+          for path in \
+            index.html \
+            coi.js \
+            rsdkv4/rsdkv4.sdk.js \
+            demo/demo.js \
+            manifest.json
+          do
+            test -f "dist/$path" || { echo "missing: dist/$path"; exit 1; }
+          done
+          du -sh dist
+
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deploy
+        uses: actions/deploy-pages@v4

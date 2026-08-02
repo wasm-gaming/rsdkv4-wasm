@@ -14,7 +14,7 @@
 // `config.persist` (see mountWorkingDir), and when the dir is OPFS-backed the SDK
 // reuses an already-persisted Data.rsdk/settings.ini instead of re-fetching.
 
-import type { EngineConfig, EngineInstance, AssetData } from '@wasm-gaming/engine-specs';
+import type { EngineConfig, EngineInstance, EngineEvent, AssetData, InputPreset, KeyMap } from '@wasm-gaming/engine-specs';
 import { manifest } from './rsdkv4.manifest.js';
 import { DEFAULT_RSDKV4_OPTIONS, type Rsdkv4Options } from './rsdkv4.options.js';
 
@@ -22,6 +22,12 @@ export { manifest };
 
 const WORK_ROOT = '/data';
 const DEFAULT_STORAGE_NAMESPACE = 'default';
+
+/**
+ * Emscripten's SDL2 port locates the canvas via `document.querySelector('#canvas')`,
+ * so the element the game draws into has to carry this id.
+ */
+const CANVAS_ID = 'canvas';
 
 /** Serialize engine options into RSDKv4's settings.ini format. */
 function buildSettingsIni(options: Rsdkv4Options = {}): string {
@@ -159,20 +165,102 @@ export type Rsdkv4LoadConfig = EngineConfig & {
    * Examples: "sonic1", "sonic2", "my-pack/v1".
    */
   storageNamespace?: string;
+  /** Deprecated alias for `canvasEl`, kept for hosts written against 0.0.x. */
+  canvas?: HTMLCanvasElement;
 };
 
 /** Boot the RSDKv4 engine. */
 export async function load(config: Rsdkv4LoadConfig): Promise<Rsdkv4Instance> {
-  const { canvas, assets, onEvent } = config;
+  const { assets, onEvent, attachTo } = config;
   const options = config.options as Rsdkv4Options | undefined;
-  if (!canvas) throw new Error('rsdkv4: config.canvas is required');
+
+  const emit = (event: EngineEvent): void => {
+    try {
+      onEvent?.(event);
+    } catch {
+      // A host callback must not break the engine runtime.
+    }
+  };
+
+  // ----------------------------------------------------------------- render target
+
+  const providedCanvas = config.canvasEl ?? config.canvas ?? null;
+  if (!providedCanvas && !attachTo) {
+    throw new Error('rsdkv4: config.canvasEl or config.attachTo is required');
+  }
+
+  const ownsCanvas = providedCanvas === null;
+  const canvas = providedCanvas ?? document.createElement('canvas');
 
   // Emscripten's SDL2 port locates the canvas via document.querySelector('#canvas').
-  if (canvas.id !== 'canvas') canvas.id = 'canvas';
+  if (canvas.id !== CANVAS_ID) {
+    if (canvas.id) {
+      console.warn(
+        `rsdkv4: renaming the render target's id from "${canvas.id}" to "${CANVAS_ID}" — SDL looks the canvas up by that id.`,
+      );
+    }
+    canvas.id = CANVAS_ID;
+  }
 
-  const emit = (e: Parameters<NonNullable<EngineConfig['onEvent']>>[0]) => {
-    try { onEvent?.(e); } catch { /* host handler must not break us */ }
+  if (ownsCanvas) {
+    canvas.style.display = 'block';
+    canvas.style.maxWidth = '100%';
+    canvas.style.maxHeight = '100%';
+    canvas.style.height = 'auto';
+    canvas.classList.add('emscripten');
+
+    attachTo?.appendChild(canvas);
+  }
+
+  // A canvas is not in the tab order and `focus()` on one is a silent no-op
+  // until it has a tabindex. -1 makes it focusable without adding a tab stop.
+  if (!canvas.hasAttribute('tabindex')) canvas.setAttribute('tabindex', '-1');
+  // …and the focus ring would draw a browser-blue box around the picture.
+  canvas.style.outline = 'none';
+
+  const swallowContextMenu = (event: Event): void => event.preventDefault();
+  canvas.addEventListener('contextmenu', swallowContextMenu);
+
+  const focusCanvas = (): void => {
+    if (!document.hasFocus()) window.focus();
+    canvas.focus({ preventScroll: true });
   };
+
+  const onPointerDown = (): void => focusCanvas();
+  canvas.addEventListener('pointerdown', onPointerDown);
+
+  // ----------------------------------------------------------------- sizing
+
+  /** The box the picture has to fit inside, in CSS pixels. */
+  const boxElement = ownsCanvas && attachTo ? attachTo : canvas;
+
+  const fitPicture = (): void => {
+    if (!ownsCanvas) return;
+    const box = boxElement.getBoundingClientRect();
+    if (box.width < 1 || box.height < 1) return;
+
+    const bw = manifest.video.baseWidth;
+    const bh = manifest.video.baseHeight;
+    const scale = Math.min(box.width / bw, box.height / bh);
+    canvas.style.width = `${Math.round(bw * scale)}px`;
+    canvas.style.height = `${Math.round(bh * scale)}px`;
+  };
+
+  fitPicture();
+
+  const onResize = (): void => fitPicture();
+  window.addEventListener('resize', onResize);
+  const boxObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(onResize);
+  boxObserver?.observe(boxElement);
+
+  // Fullscreen transitions need a refit too.
+  const onFullscreenChange = (): void => {
+    fitPicture();
+    requestAnimationFrame(fitPicture);
+  };
+  document.addEventListener('fullscreenchange', onFullscreenChange);
+
+  // ----------------------------------------------------------------- emscripten
 
   const jsUrl = config.jsUrl ?? new URL('./rsdkv4.js', import.meta.url).href;
   const wasmUrl = config.wasmUrl ?? new URL('./rsdkv4.wasm', import.meta.url).href;
@@ -261,6 +349,8 @@ export async function load(config: Rsdkv4LoadConfig): Promise<Rsdkv4Instance> {
   // Run main() from the OPFS/WASMFS working dir. simulate_infinite_loop schedules
   // the rAF loop and returns via a benign unwind Emscripten swallows.
   Module.callMain(['UsingCWD']);
+
+  focusCanvas();
   emit({ type: 'ready' });
 
   return {
@@ -270,7 +360,7 @@ export async function load(config: Rsdkv4LoadConfig): Promise<Rsdkv4Instance> {
     reset() {
       throw new Error('rsdkv4: reset() is not supported — destroy() and load() again');
     },
-    setInput(preset) {
+    setInput(preset: InputPreset | KeyMap) {
       if (typeof window !== 'undefined') {
         (window as any).__gamepadKeyMap = preset ?? manifest.input;
       }
@@ -278,6 +368,13 @@ export async function load(config: Rsdkv4LoadConfig): Promise<Rsdkv4Instance> {
     destroy() {
       try { Module.pauseMainLoop?.(); } catch { /* noop */ }
       try { setPaused(true); } catch { /* noop */ }
+
+      canvas.removeEventListener('contextmenu', swallowContextMenu);
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      window.removeEventListener('resize', onResize);
+      boxObserver?.disconnect();
+      if (ownsCanvas) canvas.remove();
     },
     devMenu,
     persistent,

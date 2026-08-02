@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Static preview server with COOP/COEP headers for local OPFS testing."""
+"""Static preview server with COOP/COEP headers for local WebAssembly testing.
+
+The engine is built with threads, so it needs SharedArrayBuffer, so the page
+has to be cross-origin isolated. Serving dist/ through this makes
+`crossOriginIsolated` true, which is what the SDK checks for OPFS persistence.
+"""
 
 from __future__ import annotations
 
@@ -12,9 +17,17 @@ from pathlib import Path
 class CoopCoepHandler(SimpleHTTPRequestHandler):
     """Simple static file handler that always adds cross-origin isolation headers."""
 
+    extensions_map = {
+        **SimpleHTTPRequestHandler.extensions_map,
+        ".wasm": "application/wasm",
+        ".dll": "application/octet-stream",
+        ".dat": "application/octet-stream",
+    }
+
     def end_headers(self) -> None:
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+        self.send_header("Cross-Origin-Resource-Policy", "cross-origin")
         super().end_headers()
 
 
@@ -22,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Serve static files with COOP/COEP headers for local preview."
     )
-    parser.add_argument("--port", type=int, default=8080, help="Port to bind to (default: 8080)")
+    parser.add_argument("--port", type=int, default=8024, help="Port to bind to (default: 8024)")
     parser.add_argument(
         "--directory",
         type=Path,
