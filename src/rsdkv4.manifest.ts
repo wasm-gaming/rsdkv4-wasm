@@ -7,7 +7,7 @@ import { RSDKV4_OPTIONS_SCHEMA } from './rsdkv4.options.js';
 
 export const manifest: EngineManifest = {
   id: 'rsdkv4',
-  version: '0.1.3',
+  version: '0.1.5',
   name: 'Retro Software Development Kit v4',
   description:
     'RSDKv4 compiled to WebAssembly via Emscripten. One game-agnostic WASM binary runs both Sonic 1 and Sonic 2 — the difference is only which Data.rsdk the host supplies at runtime. Ships none of the game: the player provides their own Data.rsdk, and it never leaves their browser.',
