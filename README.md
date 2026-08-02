@@ -73,14 +73,19 @@ Engine-specific options are described in [src/rsdkv4.options.ts](src/rsdkv4.opti
 
 Built with **`-sWASMFS`** — Emscripten's modern filesystem, replacing MEMFS. The
 game working dir `/data` is mounted on **OPFS** (persistent) via the `WebFS.cpp`
-`web_mount_opfs` helper when the page is **cross-origin isolated**; otherwise it
-falls back to the WASMFS in-memory backend so the engine still boots. `Data.rsdk`
+`web_mount_opfs` helper when the page is **cross-origin isolated** *and* the wasm
+build can create the OPFS backend from the main thread (see the caveat below —
+today's build can't); otherwise it falls back to the WASMFS in-memory backend so
+the engine still boots. `Data.rsdk`
 and the generated `settings.ini` are written there and read via CWD (the engine
 is booted with the `UsingCWD` arg).
 
 ### Backend selection — `config.persist`
-- `undefined` (default) — **auto**: OPFS when cross-origin isolated, else in-memory.
-- `'opfs'` — **force** OPFS; warn + fall back to in-memory if unavailable.
+- `undefined` (default) — **auto**: OPFS when cross-origin isolated *and* the build
+  supports the mount, else in-memory.
+- `'opfs'` — **ask for** OPFS; warn + fall back to in-memory if unavailable. (It
+  can't be *forced*: a build that can't mount OPFS would abort the module, so the
+  SDK checks first and falls back rather than trying.)
 - `null` — **force the in-memory** WASMFS backend (the MEMFS-equivalent fallback;
   non-persistent).
 
@@ -94,6 +99,22 @@ is booted with the `UsingCWD` arg).
 
 This prevents cross-game reuse collisions and allows purging one game's files
 without touching the others.
+
+### `/data` *is* the OPFS root
+`web_mount_opfs` mounts the backend returned by `wasmfs_create_opfs_backend()`,
+whose root is `navigator.storage.getDirectory()`. So the WASM path `/data/<ns>/…`
+and the OPFS path `<ns>/…` a host reaches from JS are **the same file**:
+
+| host, from JS (OPFS API)     | engine, inside WASMFS         |
+| ---------------------------- | ----------------------------- |
+| `rsdkv4/Sonic1/Data.rsdk`    | `/data/rsdkv4/Sonic1/Data.rsdk` |
+
+A launcher can therefore write a player's `Data.rsdk` straight into the folder the
+engine will use as its working dir and then load with
+`storageNamespace: 'rsdkv4/Sonic1'` and **no `assets.data` at all** — the SDK finds
+the file already persisted and skips the copy. That is what this repo's demo does
+(see [Try it locally](#try-it-locally)); it keeps one copy of a ~40 MB pack instead
+of two, and the game's save data lands next to it in the same folder.
 
 ### Skip re-fetch when already persisted
 When the working dir is OPFS-backed, the SDK checks whether `/data/Data.rsdk`
@@ -126,15 +147,20 @@ const purged = sonic2.purgeStorage();
 console.log(purged); // { data: true|false, settings: true|false }
 ```
 
-> Persistence only actually engages under cross-origin isolation (see the OPFS
-> caveat below), so the skip-fetch benefit needs COOP/COEP + `-pthread` to be real.
+> Persistence doesn't engage with the current build (see the OPFS caveat below),
+> so the skip-fetch benefit isn't real yet — every load fetches.
 
-> ⚠️ **OPFS caveat (unverified):** OPFS sync-access handles only exist in Workers,
-> so Emscripten proxies them to a thread — reliable OPFS needs **`-pthread`** in
-> the build plus **COOP/COEP** headers on the host. This build is single-threaded,
-> so today OPFS persistence is best-effort and gated on `crossOriginIsolated`.
-> Adding `-pthread` interacts with SDL2 + `emscripten_set_main_loop` and must be
-> validated with a real build.
+> ⚠️ **OPFS caveat:** OPFS sync-access handles only exist in Workers, so WASMFS's
+> OPFS backend spawns a proxy worker — and it **refuses to do that from the main
+> browser thread** unless the build has **`-sASYNCIFY`** or **`-sJSPI`**. It
+> doesn't fail softly either: `wasmfs_create_opfs_backend()` asserts, and the
+> failed assert `abort()`s the module, so there is nothing left to fall back with.
+> The SDK mounts by calling into the module from the page (main thread) and this
+> build has neither flag, so `web_opfs_supported()` (WebFS.cpp) reports 0 and the
+> SDK never attempts the mount — COOP/COEP alone changes nothing. Making it real
+> means either building with Asyncify/JSPI, or `-pthread` + performing the mount
+> from the engine thread; both interact with SDL2 + `emscripten_set_main_loop` and
+> must be validated with a real build.
 
 ## Build
 
@@ -149,7 +175,9 @@ make build-wasm   # local: runs scripts/build.sh inside emscripten/emsdk (Docker
 
 - `build-lib` compiles the SDK/options/manifest (`.js` + `.d.ts`) → `dist/rsdkv4/`.
 - `build-manifest` serializes the typed manifest to `dist/manifest.json`.
-- `build-demo` compiles `src/demo/demo.ts` → `dist/demo.js`, copies
+- `build-demo` compiles `src/demo/{demo,library}.ts` → `dist/`, copies the shared
+  demo template from `@wasm-gaming/engine-specs` → `dist/demo/`, overwrites its
+  launcher with `src/demo/components/launcher.html` (the two-game one), copies
   `src/demo/index.html` → `dist/index.html`, seeds `dist/settings.ini`.
 - **`scripts/build.sh`** does not call Docker — it runs the WASM build steps
   directly and expects an Emscripten SDK on PATH. In CI it runs inside an
@@ -176,40 +204,66 @@ dist/
 │   └── rsdkv4.manifest.js(+ .d.ts)
 ├── manifest.json         # declarative manifest (artifacts → rsdkv4/rsdkv4.*)
 ├── index.html            # demo shell (import map → ./rsdkv4/rsdkv4.sdk.js)
-├── demo.js
+├── demo.js               # window.SDK + window.rsdkv4Library
+├── library.js            # the two-game OPFS library (src/demo/library.ts)
+├── demo/                 # shared template (engine-specs), launcher.html replaced
 ├── settings.ini          # seeded from src/settings.default.ini if absent
-└── Data.rsdk             # dev-provided (git-ignored)
+└── Data.rsdk             # unused by the demo; kept for manual experiments
 ```
 
 ## Try it locally
 
 ```bash
-make build                           # produce dist/ (TypeScript + WASM)
-cp /path/to/Data.rsdk dist/          # git-ignored dev file the demo auto-loads
-cp /path/to/settings.ini dist/       # OPTIONAL — else seeded/generated
-make preview                         # serves dist/ on :8080
-# open http://localhost:8080/
+make build      # produce dist/ (TypeScript + WASM)
+make preview    # serves dist/ on :8024 with COOP/COEP
+# open http://localhost:8024/
 ```
 
-The demo fetches `./Data.rsdk` (required) and, if present, `./settings.ini`
-(optional) from `dist/`, mounting both into WASMFS. Without a `Data.rsdk` file the
-demo shows a pick / drag-and-drop prompt; without a `settings.ini` file the SDK
-synthesizes one from `config.options`.
+### The launcher is a two-game library
+
+One WASM, two games — so the demo launcher is not a ROM picker but a shelf with
+one slot per game. Drop **Sonic 1's** `Data.rsdk` on one slot and **Sonic 2's** on
+the other (drag-and-drop or the file picker), pick a slot, press **Play**. Each
+pack is stored once, in the browser, and never uploaded:
+
+```
+OPFS root
+└── rsdkv4/
+    ├── Sonic1/
+    │   ├── Data.rsdk      ← what you dropped
+    │   ├── settings.ini   ← written by the SDK on first launch
+    │   └── …              ← that game's save data
+    └── Sonic2/…
+```
+
+Because [`/data` is the OPFS root](#data-is-the-opfs-root), that folder *is* the
+engine's working dir: launching loads with `storageNamespace: 'rsdkv4/Sonic1'` and
+no assets, so nothing is copied or re-read. **Replace** swaps the pack; **Remove**
+deletes only `Data.rsdk`, leaving settings and saves for when it comes back.
+
+A page that isn't cross-origin isolated can't reach OPFS from WASM (see the caveat
+above), so the SDK falls back to an in-memory working dir and pulls the bytes
+through `dataProvider()` — the library serves them from the same stored copy, so
+the games still launch, they just don't persist their saves.
+
+The pieces: [src/demo/library.ts](src/demo/library.ts) (storage),
+[src/demo/components/launcher.html](src/demo/components/launcher.html) (the slots),
+[src/demo/index.html](src/demo/index.html) (wiring to `SDK.load`).
 
 ## Live demo (GitHub Pages)
 
 The `pages` job in [.github/workflows/build.yml](.github/workflows/build.yml)
-publishes `dist/` to GitHub Pages on pushes to `main` (and manual runs). Since
-`Data.rsdk` is git-ignored, the live demo opens on the pick / drag-and-drop
-prompt — drop a `Data.rsdk` to boot.
+publishes `dist/` to GitHub Pages on pushes to `main` (and manual runs). No game
+data ships with it, so the live demo opens on two empty slots — drop each game's
+`Data.rsdk` once and they stay in that browser.
 
 - **One-time setup:** repo *Settings → Pages → Build and deployment → Source =
   GitHub Actions*. The workflow also calls `actions/configure-pages` with
   `enablement: true`, so first deploy can bootstrap Pages automatically when the
   repo-level Pages site does not exist yet.
-- **OPFS note:** GitHub Pages can't set COOP/COEP headers, so the page isn't
-  cross-origin isolated — OPFS stays off and the SDK uses the in-memory WASMFS
-  backend (see the filesystem caveat above).
+- **OPFS note:** OPFS stays off and the SDK uses the in-memory WASMFS backend —
+  GitHub Pages can't set COOP/COEP headers, and this build couldn't mount OPFS
+  even isolated (see the filesystem caveat above).
 
 ## Status
 
@@ -219,9 +273,9 @@ prompt — drop a `Data.rsdk` to boot.
   the `web_devmenu_*` embind bridge, `callMain`/`FS`/`ccall`, no `--preload-file`).
 - ⏳ **End-to-end runtime in a browser** (boot from a real `Data.rsdk`) — not yet
   verified.
-- ⏳ **OPFS persistence** — gated on `crossOriginIsolated`; almost certainly needs
-  a `-pthread` build + COOP/COEP to actually engage (see the caveat above). Until
-  then the SDK falls back to the in-memory WASMFS backend.
+- ⏳ **OPFS persistence** — not engaged: WASMFS's OPFS backend can't be created on
+  the main browser thread without an Asyncify/JSPI build (see the caveat above),
+  so the SDK detects that and falls back to the in-memory WASMFS backend.
 
 ## License
 

@@ -15,11 +15,13 @@ set -euo pipefail
 #
 # Filesystem: built with -sWASMFS (Emscripten's modern filesystem, not MEMFS). A
 # small OPFS-mount helper (WebFS.cpp) lets the SDK back the game working dir with
-# OPFS for persistence. NOTE: OPFS sync access needs a worker/pthread environment
-# + cross-origin isolation (COOP/COEP). This build is single-threaded, so OPFS is
-# only usable where those hold; the SDK falls back to the in-memory WASMFS backend
-# otherwise. Enabling reliable OPFS likely needs -pthread here (interacts with
-# SDL2 + emscripten_set_main_loop) — VERIFY with a real build before relying on it.
+# OPFS for persistence. NOTE: WASMFS's OPFS backend spawns a proxy worker, which it
+# refuses to do from the main browser thread unless the build has ASYNCIFY or JSPI.
+# The SDK mounts by calling into the module from the page (i.e. on the main thread),
+# so with this build (single-threaded, no Asyncify) OPFS reports unsupported and the
+# SDK uses the in-memory WASMFS backend. Enabling it means either -sASYNCIFY/-sJSPI
+# here, or -pthread + doing the mount from the engine thread (interacts with SDL2 +
+# emscripten_set_main_loop) — VERIFY with a real build before relying on it.
 #
 # Output: dist/rsdkv4/rsdkv4.js (ES6 factory, EXPORT_NAME=createRSDKv4) +
 # dist/rsdkv4/rsdkv4.wasm. In CI these are attached to a GitHub Release.
@@ -57,10 +59,27 @@ cat << 'EOF' > "$WORK_DIR/RSDKv4/WebFS.cpp"
 // WASMFS backend, so callers must tolerate a non-zero return.
 #include <emscripten/wasmfs.h>
 #include <emscripten/emscripten.h>
+#include <emscripten/threading.h>
+
+// wasmfs_create_opfs_backend() spawns a proxy worker synchronously, which it
+// cannot do from the main browser thread unless the build has Asyncify or JSPI —
+// it *asserts* in that case, and a failed assert calls abort(), killing the whole
+// module (no try/catch on the JS side can undo that). web_opfs_supported()
+// mirrors the exact assertion condition (see emscripten's wasmfs/backends/
+// opfs_backend.cpp) so the SDK can ask before it commits, and web_mount_opfs()
+// re-checks so a direct caller gets -1 instead of a dead module.
+extern "C" EMSCRIPTEN_KEEPALIVE
+int web_opfs_supported(void)
+{
+    return !emscripten_is_main_browser_thread() || emscripten_has_asyncify();
+}
 
 extern "C" EMSCRIPTEN_KEEPALIVE
 int web_mount_opfs(const char *path)
 {
+    if (!web_opfs_supported())
+        return -1;
+
     backend_t opfs = wasmfs_create_opfs_backend();
     if (!opfs)
         return -1;

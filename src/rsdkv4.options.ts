@@ -32,13 +32,20 @@ export interface Rsdkv4Options {
   startingPlayer?: number;
 }
 
+/**
+ * RSDKv4 reads 255 as "not set" for the starting stage/player (see Userdata.cpp:
+ * anything else — **including 0** — makes Engine::Init skip the start-menu flow
+ * and force InitStartingStage). So "boot normally" has to be 255, not 0.
+ */
+export const RSDKV4_UNSET = 255;
+
 export const DEFAULT_RSDKV4_OPTIONS: Required<Rsdkv4Options> = {
   devMenu: false,
   engineDebugMode: true,
   vsync: true,
-  startingCategory: 0,
-  startingScene: 0,
-  startingPlayer: 0,
+  startingCategory: RSDKV4_UNSET,
+  startingScene: RSDKV4_UNSET,
+  startingPlayer: RSDKV4_UNSET,
 };
 
 export const RSDKV4_OPTIONS_SCHEMA: JSONSchema = {
@@ -57,8 +64,23 @@ export const RSDKV4_OPTIONS_SCHEMA: JSONSchema = {
       description: 'Enables the web devmenu embind bridge (stage list / warp / pause).',
     },
     vsync: { type: 'boolean', default: true },
-    startingCategory: { type: 'integer', minimum: 0, default: 0 },
-    startingScene: { type: 'integer', minimum: 0, default: 0 },
-    startingPlayer: { type: 'integer', minimum: 0, default: 0 },
+    startingCategory: {
+      type: 'integer',
+      minimum: 0,
+      default: RSDKV4_UNSET,
+      description: '0-based stage-list category; 255 = unset (normal boot flow).',
+    },
+    startingScene: {
+      type: 'integer',
+      minimum: 0,
+      default: RSDKV4_UNSET,
+      description: '0-based scene in the category; 255 = unset (normal boot flow).',
+    },
+    startingPlayer: {
+      type: 'integer',
+      minimum: 0,
+      default: RSDKV4_UNSET,
+      description: 'Player/character index; 255 = unset (normal boot flow).',
+    },
   },
 };

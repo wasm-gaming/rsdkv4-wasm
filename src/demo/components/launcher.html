@@ -1,0 +1,393 @@
+<!-- RSDKv4 launcher — replaces the shared template's single-ROM launcher.
+     Copied over dist/demo/components/launcher.html by `make build-demo`, so the
+     rest of the shared demo (sdk-info, esc-menu, launch flow) stays untouched:
+     demo.js fetches this file by path and still gets `launch` emitted from it.
+
+     One WASM plays both games, the Data.rsdk decides which — so this is a
+     two-slot library instead of one ROM picker. Storage lives in
+     window.rsdkv4Library (src/demo/library.ts), which writes each pack straight
+     into the folder the engine later uses as its working dir. -->
+
+<form class="launcher" @submit.prevent="onLaunch">
+  <section class="sdk">
+    <CSdkInfo ...sdkInfo :messages="messages" />
+  </section>
+
+  <p class="library-hint">{{ messages.libraryHint || "Drop each game's Data.rsdk once — it stays in your browser." }}</p>
+
+  <div class="games">
+    <article
+      :each="game in games"
+      :key="game.id"
+      class="game"
+      role="button"
+      tabindex="0"
+      :class="{ installed: game.installed, selected: game.id === selectedId, dropping: game.id === droppingId }"
+      @click="selectedId = game.id"
+      @keydown="$event.key === 'Enter' && (selectedId = game.id)"
+      @dblclick="onLaunch"
+      @dragover.prevent="droppingId = game.id"
+      @dragleave="droppingId = null"
+      @drop.prevent="onDrop($event, game.id)"
+    >
+      <header>
+        <span class="tag">{{ game.short }}</span>
+        <span class="year">{{ game.year }}</span>
+      </header>
+
+      <h3>{{ game.title }}</h3>
+
+      <p class="state" :if="game.installed">
+        {{ formatSize(game.size) }} · {{ storagePath(game.id) }}
+      </p>
+      <p class="state empty" :else>
+        {{ messages.slotEmpty || 'No Data.rsdk yet — drop one here' }}
+      </p>
+
+      <div class="actions">
+        <label class="picker">
+          {{ game.installed ? (messages.changeFileButton || 'Replace') : (messages.pickRomButton || 'Pick Data.rsdk') }}
+          <input type="file" accept=".rsdk" :attrs="{ disabled: busy }" @change="onPick($event, game.id)" />
+        </label>
+        <button type="button" class="remove-btn" :if="game.installed" :attrs="{ disabled: busy }" @click.stop="onRemove(game.id)">
+          {{ messages.removeFileButton || 'Remove' }}
+        </button>
+      </div>
+    </article>
+  </div>
+
+  <button type="submit" class="launch-btn" :attrs="{ disabled: !canLaunch }">
+    {{ messages.launchButton || 'Play' }}
+  </button>
+
+  <div class="status">{{ statusLine }}</div>
+</form>
+
+<script :setup="{
+  CSdkInfo,
+  sdkInfo,
+  messages = {},
+}">
+  // Set by src/demo/demo.ts before demo.init() runs. Setup scripts are compiled
+  // with `new Function`, so there is no module scope to import into.
+  const library = window.rsdkv4Library;
+
+  // Last known state, so the slots render immediately; the OPFS probe below
+  // fills in what is actually stored (assignments from .then() are reactive).
+  let games = library ? library.slots() : [];
+  // The library only pre-selects an installed game; with an empty shelf, point
+  // at the first slot anyway so the status line can name what it's asking for.
+  let selectedId = (library && library.selected()) || (games[0] && games[0].id) || null;
+
+  let droppingId = null;
+  let busy = false;
+  // Transient message (saving, launching, failure); when empty the status line
+  // falls back to describing the current selection.
+  let notice = "";
+
+  if (library) {
+    library.refresh().then((slots) => {
+      games = slots;
+      selectedId = library.selected() || selectedId;
+    });
+  }
+
+  $: selectedSlot = games.find((game) => game.id === selectedId) || null;
+  $: canLaunch = !busy && Boolean(selectedSlot && selectedSlot.installed);
+  $: statusLine = notice
+    ? notice
+    : selectedSlot && selectedSlot.installed
+      ? `${messages.statusReady || 'Ready to launch!'} (${selectedSlot.title})`
+      : selectedSlot
+        ? `${selectedSlot.short}: ${messages.statusSelectRom || 'drop its Data.rsdk to play it.'}`
+        : messages.statusSelectAny || 'Drop a Data.rsdk on a slot to begin.';
+
+  const formatSize = (bytes) =>
+    bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
+
+  const storagePath = (id) => (library ? `${library.storageNamespace(id)}/Data.rsdk` : "");
+
+  const install = async (id, file) => {
+    if (!file || busy || !library) return;
+    busy = true;
+    notice = `${messages.savingStatus || 'Storing'} ${file.name}…`;
+    try {
+      games = await library.install(id, file);
+      selectedId = library.selected();
+      notice = "";
+    } catch (error) {
+      notice = `${messages.saveFailed || 'Could not store the file'}: ${error && error.message ? error.message : error}`;
+    } finally {
+      busy = false;
+    }
+  };
+
+  const onPick = (event, id) => {
+    const input = event.target;
+    const file = input.files && input.files.item(0);
+    // Let the same file be picked again after a remove: without this the input
+    // keeps the old value and fires no change event.
+    input.value = "";
+    if (file) install(id, file);
+  };
+
+  const onDrop = (event, id) => {
+    droppingId = null;
+    const file = event.dataTransfer && event.dataTransfer.files.item(0);
+    if (file) install(id, file);
+  };
+
+  const onRemove = async (id) => {
+    if (busy || !library) return;
+    const slot = games.find((game) => game.id === id);
+    const question = messages.removeConfirm || 'Remove the stored Data.rsdk for';
+    if (typeof confirm === "function" && !confirm(`${question} ${slot ? slot.title : id}?`)) return;
+    busy = true;
+    try {
+      games = await library.remove(id);
+      // Stay on the slot that was just emptied unless another game is installed,
+      // so the status line explains what it now wants.
+      selectedId = library.selected() || id;
+      notice = "";
+    } finally {
+      busy = false;
+    }
+  };
+
+  const onLaunch = () => {
+    if (!canLaunch) return;
+    library.select(selectedId);
+    notice = `${messages.launchingStatus || 'Launching with'} ${selectedSlot.title}…`;
+    // The shared demo.js reads `{ rom, bios }` from this payload; both are null
+    // here because the pack is already in OPFS — index.html's launch handler
+    // asks the library which game was picked and hands the SDK a namespace.
+    $emit("launch", { rom: null, bios: null, game: selectedId });
+  };
+</script>
+
+<style>
+  form.launcher {
+    width: min(740px, 100%);
+    border: 1px solid var(--demo-panel-border, rgba(255, 255, 255, 0.4));
+    border-radius: var(--demo-panel-radius, 12px);
+    background: var(--demo-panel-bg, rgba(255, 255, 255, 0.25));
+    box-shadow: var(--demo-panel-shadow, inset 0 0 0 1px rgba(255, 255, 255, 0.5));
+    backdrop-filter: blur(var(--demo-panel-blur, 24px));
+    -webkit-backdrop-filter: blur(var(--demo-panel-blur, 24px));
+    padding: 1.5rem;
+    display: grid;
+    gap: 1.25rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  form.launcher::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 60px;
+    height: 60px;
+    background: linear-gradient(135deg, transparent 50%, var(--demo-accent, #ff007f) 50%);
+    opacity: 0.8;
+  }
+
+  .sdk {
+    border: 1px solid var(--demo-subpanel-border, rgba(255, 255, 255, 0.3));
+    border-radius: var(--demo-subpanel-radius, 8px);
+    padding: 1.25rem;
+    background: var(--demo-subpanel-bg, rgba(255, 255, 255, 0.35));
+    backdrop-filter: blur(var(--demo-subpanel-blur, 12px));
+    -webkit-backdrop-filter: blur(var(--demo-subpanel-blur, 12px));
+    box-shadow: var(--demo-subpanel-shadow, inset 0 0 0 1px rgba(255, 255, 255, 0.6));
+  }
+
+  .library-hint {
+    margin: -0.5rem 0 0;
+    color: var(--demo-muted, #475569);
+    font-family: var(--demo-font-mono, monospace);
+    font-size: 0.8rem;
+    letter-spacing: 0.03em;
+  }
+
+  .games {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+  }
+
+  .game {
+    border: 2px dashed var(--demo-drop-border, rgba(255, 255, 255, 0.6));
+    border-radius: var(--demo-subpanel-radius, 8px);
+    padding: 1.1rem 1.25rem 1.25rem;
+    background: var(--demo-drop-bg, rgba(255, 255, 255, 0.15));
+    backdrop-filter: blur(var(--demo-subpanel-blur, 12px));
+    -webkit-backdrop-filter: blur(var(--demo-subpanel-blur, 12px));
+    display: grid;
+    gap: 0.5rem;
+    align-content: start;
+    cursor: pointer;
+    transition: all 250ms ease;
+  }
+
+  .game:focus-visible {
+    outline: 2px solid var(--demo-accent, #ff007f);
+    outline-offset: 2px;
+  }
+
+  .game.installed {
+    border-style: solid;
+    border-color: var(--demo-subpanel-border, rgba(255, 255, 255, 0.3));
+    background: var(--demo-subpanel-bg, rgba(255, 255, 255, 0.35));
+  }
+
+  .game.selected {
+    border-color: var(--demo-accent2, #0284c7);
+    box-shadow: var(--demo-accent2-glow, 0 0 0 1px rgba(2, 132, 199, 0.5));
+  }
+
+  .game.dropping {
+    border-color: var(--demo-drop-active-border, var(--demo-accent2, #0284c7));
+    background: var(--demo-drop-active-bg, rgba(255, 255, 255, 0.4));
+  }
+
+  .game header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .game .tag {
+    font-family: var(--demo-font-mono, monospace);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--demo-accent, #ff007f);
+  }
+
+  .game .year {
+    font-family: var(--demo-font-mono, monospace);
+    font-size: 0.75rem;
+    color: var(--demo-muted, #475569);
+  }
+
+  .game h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: var(--demo-text, #0f172a);
+  }
+
+  .game .state {
+    margin: 0;
+    min-height: 1.1rem;
+    font-family: var(--demo-font-mono, monospace);
+    font-size: 0.75rem;
+    color: var(--demo-text, #0f172a);
+    word-break: break-all;
+  }
+
+  .game .state.empty {
+    color: var(--demo-muted, #475569);
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.35rem;
+  }
+
+  .picker {
+    display: inline-flex;
+    background: var(--demo-picker-bg, rgba(255, 255, 255, 0.5));
+    color: var(--demo-picker-text, var(--demo-text, #0f172a));
+    border: 1px solid var(--demo-picker-border, rgba(255, 255, 255, 0.6));
+    border-radius: var(--demo-subpanel-radius, 8px);
+    padding: 0.45rem 0.9rem;
+    cursor: pointer;
+    text-transform: uppercase;
+    font-weight: 600;
+    font-size: 0.8rem;
+    letter-spacing: 0.05em;
+    transition: all 0.2s;
+  }
+
+  .picker:hover {
+    background: var(--demo-picker-hover-bg, rgba(255, 255, 255, 0.8));
+    border-color: var(--demo-picker-hover-border, rgba(255, 255, 255, 0.9));
+  }
+
+  .picker input {
+    display: none;
+  }
+
+  .remove-btn {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    border-radius: var(--demo-subpanel-radius, 8px);
+    padding: 0.45rem 0.8rem;
+    cursor: pointer;
+    text-transform: uppercase;
+    font-weight: 600;
+    font-size: 0.8rem;
+    letter-spacing: 0.05em;
+    transition: all 0.2s;
+  }
+
+  .remove-btn:hover {
+    background: rgba(239, 68, 68, 0.3);
+    border-color: rgba(239, 68, 68, 0.8);
+    color: #dc2626;
+  }
+
+  .launch-btn {
+    width: 100%;
+    padding: 0.9rem 1.5rem;
+    font-size: 1.1rem;
+    font-weight: 700;
+    font-family: var(--demo-font-sans, sans-serif);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--demo-launch-text, #ffffff);
+    background: var(--demo-launch-bg, var(--demo-accent, #ff007f));
+    border: none;
+    border-radius: var(--demo-subpanel-radius, 8px);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: var(--demo-accent-glow, 0 0 15px rgba(255, 0, 127, 0.3));
+  }
+
+  .launch-btn:hover:not(:disabled) {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+  }
+
+  .launch-btn:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  .launch-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    box-shadow: none;
+    background: var(--demo-muted, #475569);
+  }
+
+  .status {
+    min-height: 1.2rem;
+    color: var(--demo-text, #0f172a);
+    font-family: var(--demo-font-mono, monospace);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.8;
+  }
+</style>

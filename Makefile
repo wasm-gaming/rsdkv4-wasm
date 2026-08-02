@@ -47,6 +47,15 @@ build-demo: build-lib ## Compile demo → dist/{demo.js,index.html}; copy shared
 	$(BIN)/tsc -p tsconfig.demo.json
 	rm -rf dist/demo
 	cp -R $(SPECS_DEMO) dist/demo
+	# The shared launcher is a single-ROM picker; RSDKv4 needs a two-game
+	# library (Sonic 1 / Sonic 2 packs). demo.js fetches the component by path,
+	# so replacing the file swaps the launcher and leaves the rest of the
+	# template (sdk-info, esc-menu, launch flow) untouched.
+	cp src/demo/components/launcher.html dist/demo/components/launcher.html
+	# Same override trick for the pause overlay: our copy fixes the template's
+	# leaked capture-phase keydown listener, which swallowed arrows/Enter (and
+	# with them the engine's d-pad and Start) after one open/close cycle.
+	cp src/demo/components/esc-menu.html dist/demo/components/esc-menu.html
 	cp src/demo/index.html dist/index.html
 	cp src/demo/theme.rsdkv4.css dist/theme.rsdkv4.css
 	cp src/demo/coi.js dist/coi.js

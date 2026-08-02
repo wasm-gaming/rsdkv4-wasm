@@ -9,8 +9,10 @@
 //
 // Filesystem: built with -sWASMFS (the modern Emscripten filesystem, not MEMFS).
 // The game working dir `/data` is mounted on **OPFS** for persistence when the
-// page is cross-origin isolated; otherwise it falls back to the WASMFS in-memory
-// backend (transient, but the engine still boots). The backend is selectable via
+// page is cross-origin isolated *and* the wasm build can create the OPFS backend
+// from the main thread (an Asyncify/JSPI build — today's is not, see WebFS.cpp);
+// otherwise it falls back to the WASMFS in-memory backend (transient, but the
+// engine still boots). The backend is selectable via
 // `config.persist` (see mountWorkingDir), and when the dir is OPFS-backed the SDK
 // reuses an already-persisted Data.rsdk/settings.ini instead of re-fetching.
 
@@ -29,7 +31,13 @@ const DEFAULT_STORAGE_NAMESPACE = 'default';
  */
 const CANVAS_ID = 'canvas';
 
-/** Serialize engine options into RSDKv4's settings.ini format. */
+/**
+ * Serialize engine options into RSDKv4's settings.ini format.
+ *
+ * Note the Starting* trio defaults to 255 ("unset") — writing 0 is not neutral,
+ * it tells the engine to skip its start-menu flow and force that stage. See
+ * DEFAULT_RSDKV4_OPTIONS.
+ */
 function buildSettingsIni(options: Rsdkv4Options = {}): string {
   const o = { ...DEFAULT_RSDKV4_OPTIONS, ...options };
   return [
@@ -85,30 +93,53 @@ function ensureDir(Module: any, path: string): void {
 }
 
 /**
+ * Whether this build can mount OPFS at all, asked of the wasm itself.
+ *
+ * WASMFS's `wasmfs_create_opfs_backend()` spawns a proxy worker synchronously,
+ * which it refuses to do on the main browser thread without Asyncify/JSPI — it
+ * *asserts*, and a failed assert calls `abort()`, which tears the module down for
+ * good. That is past the point where a try/catch around the call can save us, so
+ * we have to know before calling. `web_opfs_supported` (WebFS.cpp) mirrors the
+ * same condition; builds predating that helper simply answer "no".
+ */
+function opfsMountSupported(Module: any): boolean {
+  const probe = Module._web_opfs_supported;
+  if (typeof probe !== 'function') return false;
+  try {
+    return probe() !== 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Mount the game working dir, honoring `persist`:
  *   'opfs'     → force an OPFS (persistent) mount; warn + fall back if unavailable.
  *   null       → force the in-memory WASMFS backend (the MEMFS-equivalent fallback).
  *   undefined  → auto: OPFS when the page is cross-origin isolated, else in-memory.
  * ('idbfs' isn't supported under WASMFS and is treated as in-memory.)
  *
- * OPFS sync access needs a worker/pthread + cross-origin isolation, so 'auto' only
- * attempts it when isolated (the single-threaded build would otherwise trap).
+ * Cross-origin isolation is necessary but not sufficient: the mount also needs a
+ * build whose OPFS backend can run from where we call it (see opfsMountSupported),
+ * so both gates apply before we touch `web_mount_opfs`.
  * Returns whether the resulting mount is persistent.
  */
 function mountWorkingDir(Module: any, persist: EngineConfig['persist']): { persistent: boolean } {
   const isolated = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
-  const attemptOpfs = persist === 'opfs' || (persist === undefined && isolated);
+  const wantsOpfs = persist === 'opfs' || (persist === undefined && isolated);
 
-  if (attemptOpfs && typeof Module.ccall === 'function') {
+  if (wantsOpfs && typeof Module.ccall === 'function' && opfsMountSupported(Module)) {
     try {
       const rc = Module.ccall('web_mount_opfs', 'number', ['string'], [WORK_ROOT]);
       if (rc === 0) return { persistent: true };
     } catch {
       /* fall through to in-memory */
     }
-    if (persist === 'opfs') {
-      console.warn('[rsdkv4] OPFS requested but unavailable — using in-memory WASMFS');
-    }
+  }
+  if (persist === 'opfs') {
+    console.warn(
+      '[rsdkv4] OPFS requested but unavailable (needs a cross-origin isolated page and an Asyncify/JSPI build) — using in-memory WASMFS',
+    );
   }
   ensureDir(Module, WORK_ROOT);
   return { persistent: false };

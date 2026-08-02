@@ -1,0 +1,569 @@
+<div class="esc-menu-wrapper">
+  <!-- Fullscreen Modal Overlay -->
+  <div :if="open" class="esc-overlay" @click.self="$emit('close')">
+    <div class="esc-panel" tabindex="-1">
+      <!-- Header -->
+      <header class="esc-header">
+        <span class="esc-badge">{{ messages.escMenuBadge || 'PAUSED' }}</span>
+        <h2>{{ title }}</h2>
+        <button type="button" class="esc-header-exit-btn" @click="$emit('exit')">
+          <i class="esc-icon exit"></i>
+          {{ messages.escMenuExit || 'Exit to Launcher' }}
+        </button>
+        <button type="button" class="esc-close-btn" @click="$emit('close')" aria-label="Close menu">&times;</button>
+      </header>
+
+      <!-- Scrollable Options Body -->
+      <div class="esc-body">
+        <div :each="group in optionGroups" class="esc-group">
+          <h3 class="esc-group-title">{{ group.label }}</h3>
+
+          <div :each="option in group.options" class="esc-row" :class.active="activeKey === option.key"
+            @mouseenter="onHoverOption(option)" @click="onSelectOption(option)">
+
+            <div class="esc-row-label">
+              {{ option.label }}
+              <span :if="option.requiresReset" class="esc-tag">{{ messages.escMenuNeedsResetTag || 'needs reset' }}</span>
+            </div>
+
+            <div class="esc-row-control">
+              <!-- Boolean Chips: Off / On -->
+              <div :if="option.type === 'boolean'" class="esc-chip-group">
+                <button type="button" class="esc-chip" :class.active="!option.value"
+                  @click.stop="onChangeOption(option, false)">
+                  Off
+                </button>
+                <button type="button" class="esc-chip" :class.active="option.value"
+                  @click.stop="onChangeOption(option, true)">
+                  On
+                </button>
+              </div>
+
+              <!-- Enum Choice Chips -->
+              <div :if="option.type === 'enum' || option.type === 'select'" class="esc-chip-group">
+                <button :each="choice in (option.values || option.choices || [])" type="button" class="esc-chip"
+                  :class.active="option.value === choice.value" @click.stop="onChangeOption(option, choice.value)">
+                  {{ choice.label }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer with Description, Actions & Shortcut Guide -->
+      <footer class="esc-footer">
+        <p class="esc-desc">{{ activeDescription || 'Select an option to view details.' }}</p>
+
+        <div class="esc-actions">
+          <button type="button" class="esc-action-btn primary" @click="$emit('close')">
+            <i class="esc-icon resume"></i>
+            {{ messages.escMenuResume || 'Resume' }}
+          </button>
+
+          <button type="button" class="esc-action-btn" @click="$emit('restore-defaults')">
+            <i class="esc-icon defaults"></i>
+            {{ messages.escMenuRestoreDefaults || 'Restore defaults' }}
+          </button>
+
+          <button type="button" class="esc-action-btn" @click="$emit('reset')">
+            <i class="esc-icon reset"></i>
+            {{ messages.escMenuReset || 'Reset game' }}
+          </button>
+
+          <button :if="hasSaveStates" type="button" class="esc-action-btn" @click="$emit('save-state')">
+            <i class="esc-icon save"></i>
+            {{ messages.escMenuSaveState || 'Save State' }}
+          </button>
+
+          <button :if="hasSaveStates" type="button" class="esc-action-btn" @click="$emit('load-state')">
+            <i class="esc-icon load"></i>
+            {{ messages.escMenuLoadState || 'Load State' }}
+          </button>
+
+          <button :each="item in customItems" type="button" class="esc-action-btn custom" @click="$emit('custom-action', item)">
+            {{ item.label }}
+          </button>
+        </div>
+
+        <p class="esc-keys-hint">{{ messages.escMenuKeysHint || '↑ ↓ select · ← → change · Enter apply · Esc close' }}</p>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<script :setup="{
+  open = false,
+  title = 'Settings',
+  subtitle = '',
+  hasSaveStates = false,
+  optionGroups = [],
+  customItems = [],
+  messages = {},
+}">
+  let activeKey = optionGroups?.[0]?.options?.[0]?.key || "";
+  let activeDescription = optionGroups?.[0]?.options?.[0]?.description || "";
+
+  const getFlatOptions = () => {
+    const list = [];
+    for (const group of optionGroups || []) {
+      for (const opt of group.options || []) {
+        list.push(opt);
+      }
+    }
+    return list;
+  };
+
+  const onHoverOption = (option) => {
+    if (!option) return;
+    activeKey = option.key;
+    activeDescription = option.description || "";
+  };
+
+  const onSelectOption = (option) => {
+    onHoverOption(option);
+  };
+
+  const onChangeOption = (option, newValue) => {
+    option.value = newValue;
+    onHoverOption(option);
+    onOptionChange?.(option.key, newValue, option);
+    $emit("option-change", { key: option.key, value: newValue, option });
+  };
+
+  const handleKeyDown = (e) => {
+    if (!open) return;
+    const key = e.key;
+
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"].includes(key)) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const options = getFlatOptions();
+      if (options.length === 0) return;
+
+      let idx = options.findIndex((o) => o.key === activeKey);
+      if (idx < 0) idx = 0;
+
+      if (key === "ArrowDown") {
+        const nextIdx = (idx + 1) % options.length;
+        onHoverOption(options[nextIdx]);
+      } else if (key === "ArrowUp") {
+        const prevIdx = (idx - 1 + options.length) % options.length;
+        onHoverOption(options[prevIdx]);
+      } else if (key === "ArrowRight" || key === "ArrowLeft") {
+        const opt = options[idx];
+        if (!opt) return;
+
+        if (opt.type === "boolean") {
+          onChangeOption(opt, !opt.value);
+        } else if (opt.type === "enum" || opt.type === "select") {
+          const choices = opt.values || opt.choices || [];
+          if (choices.length > 0) {
+            const valIdx = choices.findIndex((c) => c.value === opt.value);
+            let nextValIdx;
+            if (key === "ArrowRight") {
+              nextValIdx = (valIdx + 1) % choices.length;
+            } else {
+              nextValIdx = (valIdx - 1 + choices.length) % choices.length;
+            }
+            onChangeOption(opt, choices[nextValIdx].value);
+          }
+        }
+      } else if (key === "Enter") {
+        onClose?.();
+      }
+    }
+  };
+
+  // Local override of the shared template's esc-menu (see the Makefile, which
+  // copies this over it — same trick as launcher.html).
+  //
+  // Upstream registers this capture-phase listener once per mount and never
+  // removes it, and the menu is destroyed + re-mounted on every open and close.
+  // So after one open/close cycle a stale listener stayed on window with `open`
+  // still true in its closure, calling preventDefault + stopPropagation on
+  // ArrowUp/Down/Left/Right/Enter. Stopping propagation during the capture phase
+  // at window means the event never reaches the *bubble*-phase listener SDL
+  // registers there — i.e. touching the pause menu once silently killed the
+  // engine's d-pad and Start for the rest of the session.
+  //
+  // Keeping exactly one listener per page, always the live menu's, fixes it: a
+  // closed menu returns early and a destroyed one is no longer subscribed.
+  if (typeof window !== "undefined") {
+    if (window.__escMenuKeyHandler) {
+      window.removeEventListener("keydown", window.__escMenuKeyHandler, true);
+    }
+    window.__escMenuKeyHandler = handleKeyDown;
+    window.addEventListener("keydown", handleKeyDown, true);
+  }
+</script>
+
+<style>
+  :host {
+    display: block;
+    pointer-events: none;
+  }
+
+  .esc-menu-wrapper {
+    pointer-events: auto;
+  }
+
+  /* Modal Scrim / Overlay - Translucent lighter backdrop with blur */
+  .esc-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: var(--demo-esc-bg, rgba(0, 0, 0, 0.45));
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: clamp(0.5rem, 3vh, 2rem);
+    animation: escFadeIn 0.2s ease-out;
+  }
+
+  @keyframes escFadeIn {
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
+  }
+
+  /* Panel */
+  .esc-panel {
+    width: min(540px, 100%);
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--demo-esc-card-bg, rgba(15, 23, 42, 0.95));
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-top: 2px solid var(--demo-accent, #ff007f);
+    border-radius: var(--demo-panel-radius, 12px);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+    animation: escSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes escSlideUp {
+    from {
+      opacity: 0;
+      transform: translateY(12px) scale(0.98);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  /* Header */
+  header.esc-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.85rem 1.25rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  .esc-badge {
+    padding: 0.15rem 0.5rem;
+    background: rgba(255, 0, 127, 0.15);
+    border: 1px solid var(--demo-accent, #ff007f);
+    border-radius: 4px;
+    color: var(--demo-accent, #ff007f);
+    font-family: var(--demo-font-mono, monospace);
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  header.esc-header h2 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--demo-esc-text, #f8fafc);
+  }
+
+  .esc-header-exit-btn {
+    margin-left: auto;
+    padding: 0.4rem 0.8rem;
+    border-radius: 6px;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    background: rgba(239, 68, 68, 0.15);
+    color: #fca5a5;
+    font-family: var(--demo-font-sans, sans-serif);
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    transition: all 0.15s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .esc-header-exit-btn:hover {
+    background: rgba(239, 68, 68, 0.3);
+    border-color: rgba(239, 68, 68, 0.7);
+    color: #ffffff;
+  }
+
+  .esc-close-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--demo-muted, #94a3b8);
+    border-radius: 6px;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .esc-close-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+  }
+
+  /* Scrollable Body */
+  .esc-body {
+    padding: 1rem 1.25rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    max-height: 48vh;
+  }
+
+  .esc-group-title {
+    margin: 0 0 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--demo-accent, #ff007f);
+    opacity: 0.9;
+  }
+
+  .esc-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+    gap: 1rem;
+    cursor: pointer;
+  }
+
+  .esc-row:hover,
+  .esc-row.active {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .esc-row-label {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--demo-esc-text, #f8fafc);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .esc-tag {
+    font-size: 0.65rem;
+    font-family: var(--demo-font-mono, monospace);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    background: rgba(234, 179, 8, 0.15);
+    border: 1px solid rgba(234, 179, 8, 0.4);
+    color: #fde047;
+    text-transform: lowercase;
+  }
+
+  .esc-row-control {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    /* Local change: without a shrinkable control column the stage chips below
+     * overflow the panel instead of wrapping. */
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: flex-end;
+  }
+
+  .esc-chip-group {
+    display: inline-flex;
+    /* Local change: upstream assumes a handful of choices per row (Off/On, 4:3
+     * / 8:7 / 1:1). An RSDKv4 stage list is 24+ scenes in one row, which ran
+     * straight off the panel — wrap instead of clipping. */
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 2px;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .esc-chip {
+    padding: 0.25rem 0.6rem;
+    border: none;
+    background: transparent;
+    color: var(--demo-muted, #94a3b8);
+    font-family: var(--demo-font-sans, sans-serif);
+    font-size: 0.78rem;
+    font-weight: 600;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .esc-chip:hover {
+    color: #ffffff;
+  }
+
+  .esc-chip.active {
+    background: var(--demo-accent, #ff007f);
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(255, 0, 127, 0.3);
+  }
+
+  /* Footer */
+  footer.esc-footer {
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 0.9rem 1.25rem;
+    background: rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+
+  .esc-desc {
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--demo-muted, #94a3b8);
+    font-family: var(--demo-font-mono, monospace);
+    min-height: 2.8rem;
+    line-height: 1.4;
+  }
+
+  .esc-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+  }
+
+  /* Action buttons */
+  .esc-action-btn {
+    padding: 0.6rem 1.1rem;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--demo-esc-text, #f8fafc);
+    font-family: var(--demo-font-sans, sans-serif);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.15s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .esc-action-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.35);
+    transform: translateY(-1px);
+  }
+
+  .esc-action-btn:active {
+    transform: translateY(0);
+  }
+
+  .esc-action-btn.primary {
+    background: var(--demo-accent, #ff007f);
+    border-color: var(--demo-accent, #ff007f);
+    color: #ffffff;
+    box-shadow: 0 4px 15px rgba(255, 0, 127, 0.3);
+  }
+
+  .esc-action-btn.primary:hover {
+    filter: brightness(1.15);
+  }
+
+  .esc-action-btn.custom {
+    background: rgba(56, 189, 248, 0.12);
+    border-color: rgba(56, 189, 248, 0.3);
+    color: #7dd3fc;
+  }
+
+  .esc-action-btn.custom:hover {
+    background: rgba(56, 189, 248, 0.25);
+    color: #ffffff;
+  }
+
+  /* Reliable CSS Mask Icon Implementation */
+  .esc-icon {
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    min-height: 16px;
+    display: inline-block;
+    vertical-align: middle;
+    flex-shrink: 0;
+    background-color: currentColor;
+    -webkit-mask: var(--icon-url) no-repeat center / contain;
+    mask: var(--icon-url) no-repeat center / contain;
+  }
+
+  .esc-icon.resume {
+    --icon-url: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>');
+  }
+
+  .esc-icon.defaults {
+    --icon-url: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>');
+  }
+
+  .esc-icon.reset {
+    --icon-url: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>');
+  }
+
+  .esc-icon.exit {
+    --icon-url: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>');
+  }
+
+  .esc-icon.save {
+    --icon-url: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>');
+  }
+
+  .esc-icon.load {
+    --icon-url: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>');
+  }
+
+  .esc-keys-hint {
+    margin: 0;
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--demo-muted, #94a3b8);
+    font-family: var(--demo-font-mono, monospace);
+    opacity: 0.8;
+  }
+</style>

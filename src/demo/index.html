@@ -28,18 +28,46 @@
 <body>
   <main></main>
 
-  <!-- Engine-specific bootstrap: sets window.SDK then boots the shared template. -->
+  <!-- Engine-specific bootstrap: sets window.SDK + window.rsdkv4Library, then the
+       inline module below boots the shared template. -->
   <script type="module" src="./demo.js"></script>
 
   <script type="module">
     import demo from './demo/demo.js'
 
+    // src/demo/library.ts, published on window by demo.js above. It owns the two
+    // Data.rsdk slots in OPFS (rsdkv4/Sonic1/, rsdkv4/Sonic2/) and the launcher
+    // component renders from it — including the OPFS probe, which is why nothing
+    // is awaited here: the template's demo.js arms a `setTimeout(demo.init, 0)`
+    // fallback on import, so init() has to be called in this same tick or the
+    // page boots twice (once with the default config).
+    const library = window.rsdkv4Library
+
+    // Pause overlay config. `optionGroups` is handed over as a stable array the
+    // template keeps by reference: the engine's stage list only exists once the
+    // engine has initialised (Engine.Init runs on the first frame, after
+    // SDK.load resolves), so we fill this in the first time the menu opens.
+    // Title is mutated on launch so the overlay is named after the game running.
+    const stageGroups = []
+    const escMenu = { enabled: true, optionGroups: stageGroups }
+
     demo
       .init({
         messages: {
           title: 'RSDKv4 — Sonic 1 & 2',
-          dropRomPrompt: 'Drop Data.rsdk',
-          launchButton: 'Launch Engine',
+          libraryHint: "Drop each game's Data.rsdk once — it is stored in your browser and never uploaded.",
+          slotEmpty: 'No Data.rsdk yet — drop one here',
+          pickRomButton: 'Pick Data.rsdk',
+          changeFileButton: 'Replace',
+          removeFileButton: 'Remove',
+          removeConfirm: 'Remove the stored Data.rsdk for',
+          savingStatus: 'Storing',
+          saveFailed: 'Could not store the file',
+          statusReady: 'Ready to launch!',
+          statusSelectRom: 'drop its Data.rsdk to play it.',
+          statusSelectAny: 'Drop a Data.rsdk on a slot to begin.',
+          launchButton: 'Play',
+          launchingStatus: 'Launching',
           escMenuTitle: 'Settings',
           escMenuResume: 'Resume',
           escMenuReset: 'Reset game',
@@ -47,29 +75,28 @@
           escMenuExit: 'Exit to Launcher',
         },
         bios: false,
-        escMenu: {
-          enabled: true,
-        },
-      })
-      .on('rom:save', ({ file }) => {
-        console.log('[Demo] ROM loaded:', file?.name)
+        escMenu,
       })
       .on('launch', async (e) => {
         const SDK = window.SDK
         if (!SDK) throw new Error('SDK not loaded')
 
-        const assets = {}
-        if (demo.hasFile('rom')) {
-          assets.data = await demo.loadToMEMFS('rom')
-        }
+        const game = library.selectedGame()
+        if (!game) throw new Error('No game selected')
+
+        escMenu.title = `${game.short} — Settings`
 
         const instance = await SDK.load({
           attachTo: e.attachTo,
-          assets,
-          options: {
-            fileName: e.fileName,
-            byteLength: e.byteLength,
-          },
+          // The pack already sits in OPFS at rsdkv4/<game>/Data.rsdk, which is
+          // the very directory the engine mounts as its working dir — so no
+          // assets are handed over and nothing is copied. dataProvider is the
+          // fallback for when the WASM side can't reach OPFS itself (no
+          // cross-origin isolation, or a build without Asyncify/JSPI — which is
+          // today's, see the OPFS caveat in the README) and needs the bytes
+          // read from JS instead. That path is the one in use right now.
+          storageNamespace: library.storageNamespace(game.id),
+          dataProvider: () => library.readBytes(game.id),
           onEvent(event) {
             if (event.type === 'error') {
               console.error(event.error)
@@ -78,7 +105,43 @@
         })
 
         instance.start()
+
+        // The overlay's rows are the engine's own stage list, read through the
+        // RSDKv4 dev-menu bridge (WebDevMenu.cpp) — picking one warps the game
+        // exactly like the native Dev Menu would. The template's stock rows
+        // (image filtering, aspect ratio, audio…) are placeholders from its
+        // generic-emulator config and are not wired to anything in RSDKv4, so
+        // we replace them rather than show controls that do nothing.
+        escMenu.onOptionChange = (key, value) => {
+          const match = /^stage:(\d+)$/.exec(key)
+          if (!match) return
+          instance.devMenu.loadStage(Number(match[1]), Number(value))
+          // The engine is paused while the menu is open, so the warp happens on
+          // resume — closing the overlay is what starts the new stage.
+        }
+
         return instance
+      })
+      .on('esc', ({ open, instance }) => {
+        if (!open || stageGroups.length || !instance) return
+
+        // Category index must survive the filter — it is what loadStage() takes.
+        const options = instance.devMenu
+          .getStageList()
+          .map((category, index) => ({
+            key: `stage:${index}`,
+            label: category.name,
+            description: `Warp to a scene in ${category.name}. RSDKv4 stage list, straight from the game's GameConfig.`,
+            type: 'enum',
+            value: null,
+            values: category.stages.map((stage, stageIndex) => ({
+              value: stageIndex,
+              label: stage.name,
+            })),
+          }))
+          .filter((option) => option.values.length > 0)
+
+        if (options.length) stageGroups.push({ id: 'stages', label: 'Stage select', options })
       })
   </script>
 </body>

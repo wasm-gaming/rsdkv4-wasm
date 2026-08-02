@@ -119,8 +119,47 @@ body::before {
       0 26px / 32px 32px;
 }
 
+/* Runtime box.
+ *
+ * The template sizes `.runtime` for a 5:4 console (`aspect-ratio: 5/4`, and a
+ * canvas width of `min(100vw, 100vh * 5/4)`). RSDKv4 renders 424×240 — 16:9 —
+ * so that box came out 891 CSS px wide inside a 1280 px viewport, and since the
+ * SDK fits the picture to *this* box (writing inline width/height on the canvas,
+ * which outranks the sheet), the game ended up neither filling the page nor
+ * centred: 891×504, flush against the top-left.
+ *
+ * Fixed by giving the runtime the viewport and centring the picture in it. The
+ * SDK's fit-to-box maths then scales 424×240 to the largest size that fits. */
+main.running {
+  display: block;
+  padding: 0;
+}
+
+.runtime {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  aspect-ratio: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* The pause overlay is a sibling of the canvas; keep it out of the flex flow so
+ * it can't shove the picture off-centre. Its own panel is position:fixed. */
+.runtime > .esc-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
 /* RSDKv4 draws low-res sprite art; keep the upscale crisp instead of blurry. */
 .runtime canvas {
+  aspect-ratio: auto;
+  max-width: 100%;
+  max-height: 100%;
   image-rendering: pixelated;
 }
 
