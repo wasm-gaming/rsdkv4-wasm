@@ -50,54 +50,44 @@
     const escMenu = { enabled: true }
 
     /**
-     * The pause overlay's rows, built from the running engine.
+     * The pause overlay's "Jump to" buttons.
      *
-     * "Jump to" is deliberately short: the full stage list is 30+ scenes, and
-     * what a player actually wants from a pause menu is the way out (title
-     * screen), the game's own pickers (stage menu / level select) and the
-     * special stages. Everything is looked up by name in the engine's real
-     * stage list, so a pack that names things differently simply drops the rows
-     * it doesn't have rather than warping somewhere random.
+     * Deliberately short: the full stage list is 30+ scenes, and what a player
+     * wants from a pause menu is the way out (title screen), the game's own
+     * pickers (stage menu / level select) and the special stages. Each entry is
+     * looked up by name in the engine's real stage list, so a pack that names
+     * things differently drops the buttons it hasn't got rather than warping
+     * somewhere random.
+     *
+     * These are the overlay's `items`, not option rows: the template closes the
+     * menu before running an item's action, so the engine is already resumed
+     * when the warp is issued and the stage loads straight away.
      */
-    function buildEscMenuGroups(instance) {
+    function buildJumpButtons(instance) {
       const lists = instance.devMenu.getStageList()
-      const find = (listIdx, name) => {
+      const jump = (list, stage) => () => instance.devMenu.loadStage(list, stage)
+
+      const byName = (listIdx, name) => {
         const stages = lists[listIdx]?.stages ?? []
         const index = stages.findIndex((stage) => stage.name.trim().toUpperCase() === name)
-        return index < 0 ? null : { value: `${listIdx}:${index}`, label: stages[index].name }
+        return index < 0 ? null : { label: stages[index].name, action: jump(listIdx, index) }
       }
 
       // 0 = presentation, 1 = regular, 3 = special (STAGELIST_* in Scene.hpp).
-      const screens = [find(0, 'TITLE SCREEN'), find(1, 'STAGE MENU'), find(0, 'LEVEL SELECT')].filter(Boolean)
-      const specials = (lists[3]?.stages ?? []).map((stage, index) => ({
-        value: `3:${index}`,
-        label: String(index + 1),
-      }))
+      const items = [byName(0, 'TITLE SCREEN'), byName(1, 'STAGE MENU'), byName(0, 'LEVEL SELECT')]
+      lists[3]?.stages?.forEach((stage, index) => {
+        items.push({ label: `Special ${index + 1}`, action: jump(3, index) })
+      })
 
-      const jumpTo = []
-      if (screens.length) {
-        jumpTo.push({
-          key: 'screen',
-          label: 'Screen',
-          description: 'Warp to one of the game’s own screens. Applies when you close this menu.',
-          type: 'enum',
-          value: null,
-          values: screens,
-        })
-      }
-      if (specials.length) {
-        jumpTo.push({
-          key: 'special',
-          label: 'Special stage',
-          description: 'Drop straight into a special stage.',
-          type: 'enum',
-          value: null,
-          values: specials,
-        })
-      }
+      return items.filter(Boolean)
+    }
 
-      // The engine's own GAME OPTIONS screen — spindash, speed caps, item boxes,
-      // super forms — as live values. Sonic 1 and Sonic 2 expose different ones.
+    /**
+     * The engine's own GAME OPTIONS screen — spindash, speed caps, item boxes,
+     * super forms — as live option rows. Sonic 1 and Sonic 2 expose different
+     * ones, so this follows whatever the running pack reports.
+     */
+    function buildEscMenuGroups(instance) {
       const gameOptions = instance.game.options().map((option) => ({
         key: `opt:${option.key}`,
         label: option.label,
@@ -109,10 +99,7 @@
           : {}),
       }))
 
-      const groups = []
-      if (jumpTo.length) groups.push({ id: 'jump', label: 'Jump to', options: jumpTo })
-      if (gameOptions.length) groups.push({ id: 'game', label: 'Game options', options: gameOptions })
-      return groups
+      return gameOptions.length ? [{ id: 'game', label: 'Game options', options: gameOptions }] : []
     }
 
     const startScreens = { mount: mountStartScreens }
@@ -181,27 +168,22 @@
 
         instance.start()
 
-        // The pause overlay's rows are the engine's, not the template's. The
-        // stock ones (image filtering, aspect ratio, audio…) come from its
+        // The pause overlay's contents are the engine's, not the template's. The
+        // stock rows (image filtering, aspect ratio, audio…) come from its
         // generic-emulator config and are wired to nothing in RSDKv4, so they
         // are replaced rather than shown as controls that do nothing:
-        //   · "Jump to" — warps, via the dev-menu bridge (WebDevMenu.cpp)
-        //   · "Game options" — the engine's own GAME OPTIONS screen, read and
-        //     written through instance.game (WebGame.cpp), same globals and
+        //   · "Jump to" buttons — warps via the dev-menu bridge (WebDevMenu.cpp),
+        //     each one closing the menu and landing immediately
+        //   · "Game options" rows — the engine's own GAME OPTIONS screen, read
+        //     and written through instance.game (WebGame.cpp), same globals and
         //     same save file the native menu uses.
         escMenu.onOptionChange = (key, value) => {
-          if (key === 'screen' || key === 'special') {
-            const [list, stage] = String(value).split(':').map(Number)
-            instance.devMenu.loadStage(list, stage)
-            // The engine is paused while the menu is open, so the warp lands on
-            // resume — closing the overlay is what starts the new stage.
-            return
-          }
           const option = key.startsWith('opt:') ? key.slice(4) : null
           if (option) instance.game.setOption(option, value === true ? 1 : value === false ? 0 : Number(value))
         }
 
         escMenu.optionGroups = buildEscMenuGroups(instance)
+        escMenu.items = buildJumpButtons(instance)
 
         // One save-select screen — file and character in the same place —
         // instead of the engine's own text menus (which is why it boots with

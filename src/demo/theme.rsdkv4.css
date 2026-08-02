@@ -215,6 +215,9 @@ main.running {
 .rsdk-start-card {
   display: flex;
   flex-direction: column;
+  color: #fff;
+  font-family: inherit;
+  cursor: pointer;
   width: clamp(7.5rem, 12vw, 9.5rem);
   /* Cards line up whatever they hold: a resumed file (one portrait and a line
    * of text) is shorter than an empty one (a character to pick out of four). */
@@ -241,60 +244,54 @@ main.running {
   text-transform: uppercase;
 }
 
-/* The art well — one big button on a used file, one per character on an empty
- * one. Both fill the card so the whole picture is the click target. */
-.rsdk-start-continue,
-.rsdk-start-chars {
+/* The art well: the character, with ▲▼ on files that let you choose one. */
+.rsdk-start-art {
   display: flex;
   flex: 1 1 auto;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 6.5rem;
-  padding: 0.5rem 0.35rem;
+  gap: 0.15rem;
+  min-height: 6rem;
+  padding: 0.4rem 0.35rem;
   background: linear-gradient(150deg, var(--s1-sky) 0 42%, var(--s1-blue) 42% 100%);
 }
 
-.rsdk-start-continue {
-  flex-direction: column;
-  gap: 0.3rem;
-  border: none;
-  color: #fff;
-  font-family: inherit;
-  cursor: pointer;
+.rsdk-start-arrow {
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  opacity: 0.9;
 }
 
-.rsdk-start-chars {
-  flex-wrap: wrap;
-  gap: 0.3rem;
+.rsdk-start-arrow--up {
+  border-bottom: 8px solid var(--s1-gold);
 }
 
-.rsdk-start-char {
-  padding: 3px;
-  border: 2px solid transparent;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.22);
-  cursor: pointer;
-  line-height: 0;
+.rsdk-start-arrow--down {
+  border-top: 8px solid var(--s1-gold);
 }
 
-.rsdk-start-choice:focus-visible,
-.rsdk-start-char:hover {
+.rsdk-start-arrow:hover {
+  opacity: 1;
+  filter: drop-shadow(0 0 5px rgba(255, 216, 0, 0.9));
+}
+
+/* Only the highlighted file shows its arrows, as in Mania. */
+.rsdk-start-card:not(:hover):not(:focus-visible) .rsdk-start-arrow {
+  opacity: 0.28;
+}
+
+/* The highlighted file lifts and takes a gold frame, like Mania's. The card is
+ * the button, so this is a plain :focus-visible / :hover — and `outline: none`
+ * replaces the browser ring, which the frame already says louder. */
+.rsdk-start-card:focus-visible,
+.rsdk-start-card:hover {
   outline: none;
   border-color: var(--s1-gold);
-  box-shadow: 0 0 0 2px rgba(255, 216, 0, 0.45), 0 0 16px rgba(255, 216, 0, 0.5);
-}
-
-.rsdk-start-continue:focus-visible,
-.rsdk-start-continue:hover {
-  outline: 3px solid var(--s1-gold);
-  outline-offset: -3px;
-}
-
-/* Selecting a card lifts it, like the highlighted file in Mania. */
-.rsdk-start-card:has(.rsdk-start-choice:focus-visible),
-.rsdk-start-card:has(.rsdk-start-choice:hover) {
-  border-color: var(--s1-gold);
   transform: translateY(-4px);
+  box-shadow: 0 10px 0 rgba(0, 0, 0, 0.45), 0 0 22px rgba(255, 216, 0, 0.4);
 }
 
 .rsdk-start-card {
@@ -384,6 +381,18 @@ main.running {
 .rsdk-start-face[data-character='2'] { background: #e02020; }
 .rsdk-start-face[data-character='3'] {
   background: linear-gradient(105deg, var(--s1-blue) 0 50%, var(--s1-dirt-lit) 50% 100%);
+}
+
+.rsdk-start-warning {
+  max-width: 42rem;
+  margin: 0;
+  padding: 0.6rem 0.9rem;
+  border: 2px solid var(--s1-gold);
+  border-radius: 4px;
+  background: rgba(255, 216, 0, 0.12);
+  color: #fff;
+  font-size: 0.8rem;
+  line-height: 1.4;
 }
 
 .rsdk-start-hint {

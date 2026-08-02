@@ -22,8 +22,25 @@ if (typeof window === 'undefined') {
     // letting it fall through to the network is the documented workaround.
     if (request.cache === 'only-if-cached' && request.mode !== 'same-origin') return
 
+    // Always revalidate what we proxy.
+    //
+    // This worker sits in front of every request, and `fetch(request)` uses the
+    // HTTP cache — so a rebuilt rsdkv4.wasm (10 MB, and served by most static
+    // hosts with nothing but Last-Modified) can go on being served from cache
+    // long after `make build`. The page then runs old engine code against new
+    // SDK code, which does not look like a caching problem at all: bridges the
+    // JS expects simply aren't there. `no-cache` keeps the bytes cached but
+    // revalidates every time, so a changed file costs one round trip and an
+    // unchanged one costs a 304.
+    let revalidated = request
+    try {
+      revalidated = new Request(request, { cache: 'no-cache' })
+    } catch {
+      // Navigation requests can't always be re-created; the original is fine.
+    }
+
     event.respondWith(
-      fetch(request)
+      fetch(revalidated)
         .then((response) => {
           // An opaque response has no headers to rewrite, and constructing a
           // new Response from one would strip its body.

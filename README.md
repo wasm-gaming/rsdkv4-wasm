@@ -118,6 +118,13 @@ Engine-specific options are described in [src/rsdkv4.options.ts](src/rsdkv4.opti
 ### Other niceties
 - **Canvas id guard** — forces `canvas.id = "canvas"` because Emscripten's SDL2
   port locates the canvas via `querySelector('#canvas')`.
+- **Stale-engine self-heal** — `rsdkv4.js`/`.wasm` are big and most static hosts
+  send nothing but `Last-Modified`, so browsers keep a build for hours. Fresh SDK
+  against a cached engine is a miserable failure mode: the bridges it calls
+  aren't there and every getter quietly answers "empty" — no save slots, no
+  characters, an empty pause menu. So `load()` checks the module for the bridges
+  it needs and, if any are missing, refetches once with a cache-busting query and
+  says so in the console. A healthy build loads the engine exactly once.
 
 > Audio autoplay-unlock and the gamepad→keyboard translator are cross-cutting host
 > concerns (the app's shared input script); the SDK only exposes the `input`
@@ -319,9 +326,9 @@ the games still launch. Saves still survive, through the
 Launching goes straight to a **save-select screen** — the demo's, not the engine's
 (it boots with `skipStartMenu: true`). It is laid out like Sonic Mania's: a row of
 portrait cards, status on top, character in the middle, chaos emeralds along the
-bottom, `NO SAVE` first. File and character are the *same* choice — a used file
-starts as its saved character, an empty one offers the playable characters on the
-card itself — so starting a game is one click. Everything but the game logo
+bottom, `NO SAVE` first. File and character are the *same* choice: **←/→ picks the
+file, ↑/↓ picks the player** (Sonic, Tails, Knuckles, Sonic & Tails) on any unused
+file, Enter starts. A used file starts as the character it was saved with. Everything but the game logo
 (`src/demo/assets/`) is drawn in CSS, and it drives the engine through
 `instance.game`, so the resulting game is the same one the native text menus
 would have started.
@@ -329,7 +336,9 @@ would have started.
 **Escape** opens the pause overlay, which pauses the engine *and its music* and
 shows only what RSDKv4 can actually do live:
 
-- **Jump to** — title screen, the game's stage menu, level select, special stages 1-8
+- **Jump to** — buttons for the title screen, the game's stage menu, level select
+  and special stages 1-8. Each closes the overlay and warps straight away, so
+  there is no "now press resume" step
 - **Game options** — the engine's own GAME OPTIONS (spindash, speed caps, S1
   spikes, item box set, super forms), read and written through the same globals
   and save file the native screen uses

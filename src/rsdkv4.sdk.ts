@@ -174,6 +174,26 @@ async function waitForEngine(Module: any, timeoutMs = 4000): Promise<boolean> {
   return false;
 }
 
+/**
+ * The embind bridges this SDK drives the engine through. All of them ship in the
+ * same rsdkv4.wasm, so a module missing any one of them is an artifact older
+ * than this SDK rather than a build variant.
+ */
+const ENGINE_BRIDGES = [
+  'web_engine_ready',
+  'web_game_type',
+  'web_get_players',
+  'web_get_save_slots',
+  'web_get_game_options',
+  'web_start_game',
+  'web_audio_stop',
+  'web_devmenu_get_stage_list',
+] as const;
+
+function engineBridgeComplete(Module: any): boolean {
+  return ENGINE_BRIDGES.every((name) => typeof Module?.[name] === 'function');
+}
+
 /** RSDKv4's save file, written next to the game data in the working dir. */
 const SAVE_FILE = 'SData.bin';
 
@@ -443,18 +463,47 @@ export async function load(config: Rsdkv4LoadConfig): Promise<Rsdkv4Instance> {
   // RSDKv4 keyboard bindings are the shared input script's default preset.
   if (typeof window !== 'undefined') (window as any).__gamepadKeyMap = manifest.input;
 
-  const mod: any = await import(/* @vite-ignore */ jsUrl);
-  const createRSDKv4 = mod.default;
+  const instantiate = async (bust?: string): Promise<any> => {
+    const withBust = (url: string): string => {
+      if (!bust) return url;
+      const parsed = new URL(url, location.href);
+      parsed.searchParams.set('_', bust);
+      return parsed.href;
+    };
 
-  const Module: any = await createRSDKv4({
-    canvas,
-    noInitialRun: true, // built with -sINVOKE_RUN=0; we mount data before main()
-    locateFile: (path: string) => (path.endsWith('.wasm') ? wasmUrl : path),
-    print: (...a: unknown[]) => console.log('[rsdkv4]', ...a),
-    printErr: (...a: unknown[]) => console.error('[rsdkv4]', ...a),
-    onAbort: (reason: unknown) =>
-      emit({ type: 'error', error: new Error(`rsdkv4 aborted: ${reason}`) }),
-  });
+    const mod: any = await import(/* @vite-ignore */ withBust(jsUrl));
+    return mod.default({
+      canvas,
+      noInitialRun: true, // built with -sINVOKE_RUN=0; we mount data before main()
+      locateFile: (path: string) => (path.endsWith('.wasm') ? withBust(wasmUrl) : path),
+      print: (...a: unknown[]) => console.log('[rsdkv4]', ...a),
+      printErr: (...a: unknown[]) => console.error('[rsdkv4]', ...a),
+      onAbort: (reason: unknown) =>
+        emit({ type: 'error', error: new Error(`rsdkv4 aborted: ${reason}`) }),
+    });
+  };
+
+  let Module: any = await instantiate();
+
+  // Self-heal a stale engine.
+  //
+  // rsdkv4.js/.wasm are big and served by most static hosts with nothing but
+  // Last-Modified, so a browser will happily keep a build for hours. The
+  // symptom is nasty: fresh SDK code against an old engine, where the bridges
+  // this SDK calls simply don't exist and every getter quietly answers "empty" —
+  // no save slots, no characters, an empty pause menu. Rather than leave that to
+  // the reader's cache hygiene, notice it and fetch once past the cache.
+  if (!engineBridgeComplete(Module)) {
+    console.warn(
+      '[rsdkv4] the engine that loaded is missing bridges this SDK needs — refetching past the HTTP cache',
+    );
+    Module = await instantiate(String(Date.now()));
+    if (!engineBridgeComplete(Module)) {
+      console.error(
+        '[rsdkv4] still missing engine bridges after a cache-busting reload — rsdkv4.wasm is genuinely older than this SDK; rebuild it (`make build-wasm`)',
+      );
+    }
+  }
 
   // Mount the working dir first, so we can see what's already persisted (OPFS)
   // before deciding whether to pull assets.

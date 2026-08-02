@@ -77,7 +77,7 @@ function el<K extends keyof HTMLElementTagNameMap>(
 }
 
 /** A character badge: colours come from CSS, keyed on the engine's player index. */
-function characterBadge(player: number, size: 'sm' | 'md' | 'lg'): HTMLElement {
+function characterBadge(player: number, size: 'sm' | 'lg'): HTMLElement {
   const badge = el('span', `rsdk-start-face rsdk-start-face--${size}`);
   badge.dataset.character = String(player);
   return badge;
@@ -123,8 +123,22 @@ export function mountStartScreens(
   }
 
   const grid = el('div', 'rsdk-start-grid');
-  const hint = el('p', 'rsdk-start-hint', '← → choose · Enter start');
+  const hint = el('p', 'rsdk-start-hint', '← → file · ↑ ↓ player · Enter start');
   root.append(heading, grid, hint);
+
+  // If the engine bridge isn't there, everything below degrades quietly: one
+  // character to "choose" from, no save data, and a pause menu with nothing in
+  // it. That looks like a broken UI, so say what it actually is — the page is
+  // running an rsdkv4.wasm older than this SDK, virtually always a cached one.
+  if (!reportedPlayers.length) {
+    const warning = el(
+      'p',
+      'rsdk-start-warning',
+      'Engine bridge unavailable — this page is running an older rsdkv4.wasm than the SDK expects. Reload with the cache disabled (or clear this site’s storage) after rebuilding.',
+    );
+    root.insertBefore(warning, grid);
+  }
+
   container.appendChild(root);
 
   /** Where a save resumes, as a human-readable stage name. */
@@ -145,12 +159,16 @@ export function mountStartScreens(
     teardown();
   };
 
-  /** Every focusable choice on the screen, in visual order. */
-  const choices = (): HTMLButtonElement[] => [
+  /** Every card, in visual order. */
+  const cards = (): HTMLButtonElement[] => [
     ...root.querySelectorAll<HTMLButtonElement>('.rsdk-start-choice'),
   ];
 
-  /** Arrow keys walk the choices; the screen keeps the keys off the engine. */
+  /**
+   * Left/right picks the file, up/down picks who to play as — the two axes of
+   * the same screen, so a player never has to leave it. Up/down does nothing on
+   * a used file: its character came with the save.
+   */
   function onKeyDown(event: KeyboardEvent): void {
     if (!root.isConnected) return;
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Escape'].includes(event.key)) return;
@@ -161,36 +179,59 @@ export function mountStartScreens(
     event.stopPropagation();
     if (event.key === 'Escape') return;
 
-    const buttons = choices();
-    if (!buttons.length) return;
-    const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    const step = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
-    buttons[current < 0 ? 0 : (current + step + buttons.length) % buttons.length]?.focus();
+    const all = cards();
+    if (!all.length) return;
+    const current = all.indexOf(document.activeElement as HTMLButtonElement);
+
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      const step = event.key === 'ArrowLeft' ? -1 : 1;
+      all[current < 0 ? 0 : (current + step + all.length) % all.length]?.focus();
+      return;
+    }
+
+    const card = all[current < 0 ? 0 : current];
+    card?.focus();
+    cycleCharacter(card, event.key === 'ArrowUp' ? -1 : 1);
   }
 
   window.addEventListener('keydown', onKeyDown, true);
 
   /**
-   * One card. `slot` is null for the NO SAVE card. A card with a saved game is a
-   * single button; an empty one carries a button per playable character, which
-   * is what merges "pick a file" and "pick a player" into one screen.
+   * Change which character an empty file would start as. The card shows one at
+   * a time with ▲▼ arrows, the way Mania's save select cycles a file — so the
+   * whole card stays a single button and up/down has something to act on.
+   */
+  function cycleCharacter(card: HTMLButtonElement | undefined, step: number): void {
+    if (!card || card.dataset.pick === undefined) return; // a used file: fixed character
+    const next = (Number(card.dataset.pick) + step + players.length) % players.length;
+    card.dataset.pick = String(next);
+    card.querySelector('.rsdk-start-face')?.setAttribute('data-character', String(next));
+    const name = players[next] ?? '';
+    const caption = card.querySelector('.rsdk-start-where');
+    if (caption) caption.textContent = name;
+    card.setAttribute('aria-label', card.dataset.labelPrefix + name);
+  }
+
+  /**
+   * One card, and the whole card is the button: left/right moves between them,
+   * up/down changes the character on an unused file, Enter (or a click) starts.
    */
   function buildCard(slot: RsdkSaveSlot | null): HTMLElement {
     const isNoSave = slot === null;
-    const card = el('div', 'rsdk-start-card');
+    const card = el('button', 'rsdk-start-card rsdk-start-choice');
+    card.type = 'button';
     card.dataset.state = isNoSave ? 'nosave' : slot.empty ? 'empty' : 'filled';
-
     card.append(el('span', 'rsdk-start-strip', isNoSave ? 'No save' : `Save ${slot.slot + 1}`));
 
     if (slot && !slot.empty) {
-      const pick = el('button', 'rsdk-start-choice rsdk-start-continue');
-      pick.type = 'button';
-      pick.setAttribute(
-        'aria-label',
-        `Continue save ${slot.slot + 1} as ${players[slot.character] ?? 'player'}`,
-      );
-      pick.append(
-        characterBadge(slot.character, 'lg'),
+      const character = players[slot.character] ?? 'player';
+      card.setAttribute('aria-label', `Continue save ${slot.slot + 1} as ${character}`);
+      card.append(
+        (() => {
+          const art = el('span', 'rsdk-start-art');
+          art.append(characterBadge(slot.character, 'lg'));
+          return art;
+        })(),
         el('span', 'rsdk-start-where', resumePoint(slot) ?? 'In progress'),
         (() => {
           const stats = el('span', 'rsdk-start-stats');
@@ -200,44 +241,45 @@ export function mountStartScreens(
           );
           return stats;
         })(),
+        emeraldRow(emeraldCount(slot.emeralds)),
       );
-      pick.addEventListener('click', () => start(slot.slot, slot.character));
-      card.append(pick, emeraldRow(emeraldCount(slot.emeralds)));
+      card.addEventListener('click', () => start(slot.slot, slot.character));
       return card;
     }
 
-    // Empty file (or no-save): choose who to play as, right here.
-    const caption = el('span', 'rsdk-start-where', isNoSave ? 'No progress kept' : 'New game');
-    const picks = el('div', 'rsdk-start-chars');
+    // Unused file (or no-save): the card carries the character choice itself.
+    card.dataset.pick = '0';
+    card.dataset.labelPrefix = isNoSave
+      ? 'Play without saving as '
+      : `New game on save ${slot!.slot + 1} as `;
+    card.setAttribute('aria-label', card.dataset.labelPrefix + (players[0] ?? ''));
 
-    players.forEach((name, index) => {
-      const pick = el('button', 'rsdk-start-choice rsdk-start-char');
-      pick.type = 'button';
-      pick.title = name;
-      pick.setAttribute(
-        'aria-label',
-        isNoSave ? `Play as ${name} without saving` : `New game on save ${slot!.slot + 1} as ${name}`,
-      );
-      pick.append(characterBadge(index, 'md'));
-      // Name the character being considered, rather than trying to fit four
-      // labels across a card this narrow.
-      const show = () => (caption.textContent = name);
-      const reset = () => (caption.textContent = isNoSave ? 'No progress kept' : 'New game');
-      pick.addEventListener('pointerenter', show);
-      pick.addEventListener('focus', show);
-      pick.addEventListener('pointerleave', reset);
-      pick.addEventListener('blur', reset);
-      pick.addEventListener('click', () => start(isNoSave ? NO_SAVE : slot!.slot, index));
-      picks.appendChild(pick);
+    const art = el('span', 'rsdk-start-art');
+    const up = el('span', 'rsdk-start-arrow rsdk-start-arrow--up');
+    const down = el('span', 'rsdk-start-arrow rsdk-start-arrow--down');
+    up.dataset.step = '-1';
+    down.dataset.step = '1';
+    art.append(up, characterBadge(0, 'lg'), down);
+
+    card.append(art, el('span', 'rsdk-start-where', players[0] ?? 'New game'), emeraldRow(0));
+
+    // Clicking an arrow cycles instead of starting — the arrows live inside the
+    // card button (spans, so the markup stays valid), so the click is routed here.
+    card.addEventListener('click', (event) => {
+      const arrow = (event.target as HTMLElement).closest<HTMLElement>('.rsdk-start-arrow');
+      if (arrow) {
+        cycleCharacter(card, Number(arrow.dataset.step));
+        return;
+      }
+      start(isNoSave ? NO_SAVE : slot!.slot, Number(card.dataset.pick));
     });
 
-    card.append(picks, caption, emeraldRow(0));
     return card;
   }
 
   const slots = engine.game.saveSlots();
   grid.append(buildCard(NO_SAVE), ...(slots.length ? slots : EMPTY_SLOTS).map((s) => buildCard(s)));
-  choices()[0]?.focus();
+  cards()[0]?.focus();
 
   return teardown;
 }

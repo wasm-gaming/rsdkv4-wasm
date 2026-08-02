@@ -15,6 +15,20 @@
 
       <!-- Scrollable Options Body -->
       <div class="esc-body">
+        <!-- Local addition: custom items as a block of buttons in the body.
+             Upstream squeezes them into the footer next to Resume/Reset, which
+             is fine for one or two but not for a jump list. Each closes the menu
+             and runs immediately (see demo.js's custom-action handler), so a
+             warp lands without the player having to resume first. -->
+        <div :if="customItems.length" class="esc-group">
+          <h3 class="esc-group-title">{{ messages.escMenuJumpTitle || 'Jump to' }}</h3>
+          <div class="esc-jump-grid">
+            <button :each="item in customItems" type="button" class="esc-jump-btn"
+              @click="$emit('custom-action', item)">
+              {{ item.label }}
+            </button>
+          </div>
+        </div>
         <div :each="group in optionGroups" class="esc-group">
           <h3 class="esc-group-title">{{ group.label }}</h3>
 
@@ -49,6 +63,7 @@
             </div>
           </div>
         </div>
+
       </div>
 
       <!-- Footer with Description, Actions & Shortcut Guide -->
@@ -81,9 +96,6 @@
             {{ messages.escMenuLoadState || 'Load State' }}
           </button>
 
-          <button :each="item in customItems" type="button" class="esc-action-btn custom" @click="$emit('custom-action', item)">
-            {{ item.label }}
-          </button>
         </div>
 
         <p class="esc-keys-hint">{{ messages.escMenuKeysHint || '↑ ↓ select · ← → change · Enter apply · Esc close' }}</p>
@@ -405,6 +417,35 @@
     flex: 1 1 auto;
     min-width: 0;
     justify-content: flex-end;
+  }
+
+  /* Local addition: the jump-list block (see the markup note above). */
+  .esc-jump-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding: 0.25rem 0.75rem 0.5rem;
+  }
+
+  .esc-jump-btn {
+    padding: 0.4rem 0.7rem;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    font-family: var(--demo-font-sans, sans-serif);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease;
+  }
+
+  .esc-jump-btn:hover,
+  .esc-jump-btn:focus-visible {
+    outline: none;
+    background: rgba(var(--demo-accent-rgb, 255, 216, 0), 0.16);
+    border-color: var(--demo-accent, #ffd800);
   }
 
   .esc-chip-group {
