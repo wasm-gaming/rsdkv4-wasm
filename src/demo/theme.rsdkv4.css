@@ -186,12 +186,26 @@ main.running {
   text-align: center;
 }
 
+/* The title drops in from above — on the save select, and on the launcher, where
+   the component replays it on the logo of whichever game is selected. */
+@keyframes rsdk-start-drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-1.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .rsdk-start-title {
   margin: 0;
   font-size: clamp(1.1rem, 3vw, 1.9rem);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   text-shadow: 0 3px 0 var(--s1-navy), 0 0 18px rgba(88, 192, 248, 0.5);
+  animation: rsdk-start-drop-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .rsdk-start-logo {
@@ -402,6 +416,12 @@ main.running {
   font-size: 0.75rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rsdk-start-title {
+    animation: none;
+  }
 }
 
 @media (prefers-reduced-transparency: reduce) {

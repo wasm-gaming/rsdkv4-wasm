@@ -35,6 +35,12 @@ export interface GameDefinition {
   title: string;
   /** Release year, shown as a hint under the title. */
   year: string;
+  /**
+   * The game's wordmark, relative to the demo page. Shown on the launcher (as
+   * the screen's title and as the card's cover art) and again on the save-select
+   * screen once the game is running. Copied to dist/assets by `make build-demo`.
+   */
+  logo: string;
 }
 
 export interface GameSlot extends GameDefinition {
@@ -47,8 +53,20 @@ export interface GameSlot extends GameDefinition {
 }
 
 export const GAMES: readonly GameDefinition[] = [
-  { id: 'Sonic1', short: 'Sonic 1', title: 'Sonic the Hedgehog', year: '1991' },
-  { id: 'Sonic2', short: 'Sonic 2', title: 'Sonic the Hedgehog 2', year: '1992' },
+  {
+    id: 'Sonic1',
+    short: 'Sonic 1',
+    title: 'Sonic the Hedgehog',
+    year: '1991',
+    logo: './assets/Sonic_The_Hedgehog.svg',
+  },
+  {
+    id: 'Sonic2',
+    short: 'Sonic 2',
+    title: 'Sonic the Hedgehog 2',
+    year: '1992',
+    logo: './assets/Sonic_The_Hedgehog_2.svg',
+  },
 ];
 
 /** Folder under the OPFS root that holds every game folder. */

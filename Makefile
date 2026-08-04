@@ -57,7 +57,7 @@ build-demo: build-lib ## Compile demo → dist/{demo.js,index.html}; copy shared
 	# with them the engine's d-pad and Start) after one open/close cycle.
 	cp src/demo/components/esc-menu.html dist/demo/components/esc-menu.html
 	cp src/demo/index.html dist/index.html
-	# Demo artwork (the game logos the save-select screen shows).
+	# Demo artwork (the game wordmarks the launcher and save select show).
 	rm -rf dist/assets
 	cp -R src/demo/assets dist/assets
 	cp src/demo/theme.rsdkv4.css dist/theme.rsdkv4.css

@@ -6,46 +6,64 @@
      One WASM plays both games, the Data.rsdk decides which — so this is a
      two-slot library instead of one ROM picker. Storage lives in
      window.rsdkv4Library (src/demo/library.ts), which writes each pack straight
-     into the folder the engine later uses as its working dir. -->
+     into the folder the engine later uses as its working dir.
+
+     Shaped like the in-game save select (src/demo/start-screens.ts): the game's
+     wordmark on top, a row of cards below, one card per game. It reuses that
+     screen's `.rsdk-start-*` classes from theme.rsdkv4.css — the template mounts
+     this component with `.mount()`, not `.mountShadow()`, so the page's own
+     stylesheet reaches it and the two screens can't drift apart. Only the parts
+     a launcher card has and a save card hasn't (cover art, the file buttons, the
+     footer rail) are styled below. -->
 
 <form class="launcher" @submit.prevent="onLaunch">
-  <section class="sdk">
-    <CSdkInfo ...sdkInfo :messages="messages" />
-  </section>
+  <!-- Both wordmarks are always in the DOM, stacked in the same grid cell; the
+       selected one is the visible one and drops in each time it becomes so. -->
+  <h2 class="rsdk-start-title launcher-title">
+    <img
+      :each="game in games"
+      :key="game.id"
+      class="rsdk-start-logo"
+      :class="{ 'is-active': game.id === selectedId }"
+      :attrs="{ src: game.logo, alt: game.title }"
+    />
+  </h2>
 
-  <p class="library-hint">{{ messages.libraryHint || "Drop each game's Data.rsdk once — it stays in your browser." }}</p>
+  <p class="rsdk-start-hint">{{ messages.libraryHint || "Drop each game's Data.rsdk once — it stays in your browser." }}</p>
 
-  <div class="games">
+  <div class="rsdk-start-grid">
     <article
       :each="game in games"
       :key="game.id"
-      class="game"
+      class="rsdk-start-card rsdk-start-card--game"
       role="button"
       tabindex="0"
-      :class="{ installed: game.installed, selected: game.id === selectedId, dropping: game.id === droppingId }"
-      @click="selectedId = game.id"
-      @keydown="$event.key === 'Enter' && (selectedId = game.id)"
-      @dblclick="onLaunch"
+      :attrs="{ 'data-state': game.installed ? 'filled' : 'empty', 'aria-label': cardLabel(game) }"
+      :class="{ 'is-selected': game.id === selectedId, 'is-dropping': game.id === droppingId }"
+      @focus="selectedId = game.id"
+      @click="onCard($event, game)"
+      @keydown="onCardKey($event, game)"
       @dragover.prevent="droppingId = game.id"
       @dragleave="droppingId = null"
       @drop.prevent="onDrop($event, game.id)"
     >
-      <header>
-        <span class="tag">{{ game.short }}</span>
-        <span class="year">{{ game.year }}</span>
-      </header>
+      <span class="rsdk-start-strip">{{ game.short }}</span>
 
-      <h3>{{ game.title }}</h3>
+      <span class="rsdk-start-art">
+        <img class="game-cover" :attrs="{ src: game.logo, alt: '' }" />
+      </span>
 
-      <p class="state" :if="game.installed">
+      <span class="rsdk-start-where" :if="game.installed">
         {{ formatSize(game.size) }} · {{ storagePath(game.id) }}
-      </p>
-      <p class="state empty" :else>
+      </span>
+      <span class="rsdk-start-where" :else>
         {{ messages.slotEmpty || 'No Data.rsdk yet — drop one here' }}
-      </p>
+      </span>
 
+      <!-- Clicks here must not reach the card, which would launch (or re-open
+           the file dialog) on top of what the button already does. -->
       <div class="actions">
-        <label class="picker">
+        <label class="picker" @click.stop="0">
           {{ game.installed ? (messages.changeFileButton || 'Replace') : (messages.pickRomButton || 'Pick Data.rsdk') }}
           <input type="file" accept=".rsdk" :attrs="{ disabled: busy }" @change="onPick($event, game.id)" />
         </label>
@@ -53,14 +71,20 @@
           {{ messages.removeFileButton || 'Remove' }}
         </button>
       </div>
+
+      <span class="game-rail">
+        <span>{{ game.year }}</span>
+        <span>{{ game.installed ? (messages.launchButton || 'Play') : 'Empty' }}</span>
+      </span>
     </article>
   </div>
 
-  <button type="submit" class="launch-btn" :attrs="{ disabled: !canLaunch }">
-    {{ messages.launchButton || 'Play' }}
-  </button>
+  <p class="rsdk-start-hint launcher-status">{{ statusLine }}</p>
+  <p class="rsdk-start-hint launcher-keys">← → game · Enter play</p>
 
-  <div class="status">{{ statusLine }}</div>
+  <section class="sdk">
+    <CSdkInfo ...sdkInfo :messages="messages" />
+  </section>
 </form>
 
 <script :setup="{
@@ -76,7 +100,7 @@
   // fills in what is actually stored (assignments from .then() are reactive).
   let games = library ? library.slots() : [];
   // The library only pre-selects an installed game; with an empty shelf, point
-  // at the first slot anyway so the status line can name what it's asking for.
+  // at the first slot anyway so the title and status line have a game to name.
   let selectedId = (library && library.selected()) || (games[0] && games[0].id) || null;
 
   let droppingId = null;
@@ -106,6 +130,11 @@
     bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
 
   const storagePath = (id) => (library ? `${library.storageNamespace(id)}/Data.rsdk` : "");
+
+  const cardLabel = (game) =>
+    game.installed
+      ? `${messages.launchButton || 'Play'} ${game.title}`
+      : `${messages.pickRomButton || 'Pick Data.rsdk'} — ${game.title}`;
 
   const install = async (id, file) => {
     if (!file || busy || !library) return;
@@ -154,6 +183,37 @@
     }
   };
 
+  /**
+   * The whole card is the button, as on the save-select screen: an installed
+   * game starts, an empty slot opens its file dialog — the same thing dropping
+   * a pack on it does, so there is one gesture per card either way.
+   */
+  const onCard = (event, game) => {
+    if (busy) return;
+    selectedId = game.id;
+    if (game.installed) {
+      onLaunch();
+      return;
+    }
+    event.currentTarget.querySelector('input[type="file"]').click();
+  };
+
+  /** ← → walk the row (selection follows focus), Enter/Space acts on the card. */
+  const onCardKey = (event, game) => {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      const card = event.currentTarget;
+      const all = Array.from(card.parentElement.children);
+      const step = event.key === "ArrowLeft" ? -1 : 1;
+      all[(all.indexOf(card) + step + all.length) % all.length].focus();
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onCard(event, game);
+    }
+  };
+
   const onLaunch = () => {
     if (!canLaunch) return;
     library.select(selectedId);
@@ -166,153 +226,127 @@
 </script>
 
 <style>
+  /* The launcher is a screen, not a panel: the Green Hill background stays
+     visible behind it, exactly as the save select sits over the game. */
   form.launcher {
-    width: min(740px, 100%);
-    border: 1px solid var(--demo-panel-border, rgba(255, 255, 255, 0.4));
-    border-radius: var(--demo-panel-radius, 12px);
-    background: var(--demo-panel-bg, rgba(255, 255, 255, 0.25));
-    box-shadow: var(--demo-panel-shadow, inset 0 0 0 1px rgba(255, 255, 255, 0.5));
-    backdrop-filter: blur(var(--demo-panel-blur, 24px));
-    -webkit-backdrop-filter: blur(var(--demo-panel-blur, 24px));
-    padding: 1.5rem;
-    display: grid;
-    gap: 1.25rem;
-    position: relative;
-    overflow: hidden;
-  }
-
-  form.launcher::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: 60px;
-    height: 60px;
-    background: linear-gradient(135deg, transparent 50%, var(--demo-accent, #ff007f) 50%);
-    opacity: 0.8;
-  }
-
-  .sdk {
-    border: 1px solid var(--demo-subpanel-border, rgba(255, 255, 255, 0.3));
-    border-radius: var(--demo-subpanel-radius, 8px);
-    padding: 1.25rem;
-    background: var(--demo-subpanel-bg, rgba(255, 255, 255, 0.35));
-    backdrop-filter: blur(var(--demo-subpanel-blur, 12px));
-    -webkit-backdrop-filter: blur(var(--demo-subpanel-blur, 12px));
-    box-shadow: var(--demo-subpanel-shadow, inset 0 0 0 1px rgba(255, 255, 255, 0.6));
-  }
-
-  .library-hint {
-    margin: -0.5rem 0 0;
-    color: var(--demo-muted, #475569);
-    font-family: var(--demo-font-mono, monospace);
-    font-size: 0.8rem;
-    letter-spacing: 0.03em;
-  }
-
-  .games {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 1rem;
-  }
-
-  .game {
-    border: 2px dashed var(--demo-drop-border, rgba(255, 255, 255, 0.6));
-    border-radius: var(--demo-subpanel-radius, 8px);
-    padding: 1.1rem 1.25rem 1.25rem;
-    background: var(--demo-drop-bg, rgba(255, 255, 255, 0.15));
-    backdrop-filter: blur(var(--demo-subpanel-blur, 12px));
-    -webkit-backdrop-filter: blur(var(--demo-subpanel-blur, 12px));
-    display: grid;
-    gap: 0.5rem;
-    align-content: start;
-    cursor: pointer;
-    transition: all 250ms ease;
-  }
-
-  .game:focus-visible {
-    outline: 2px solid var(--demo-accent, #ff007f);
-    outline-offset: 2px;
-  }
-
-  .game.installed {
-    border-style: solid;
-    border-color: var(--demo-subpanel-border, rgba(255, 255, 255, 0.3));
-    background: var(--demo-subpanel-bg, rgba(255, 255, 255, 0.35));
-  }
-
-  .game.selected {
-    border-color: var(--demo-accent2, #0284c7);
-    box-shadow: var(--demo-accent2-glow, 0 0 0 1px rgba(2, 132, 199, 0.5));
-  }
-
-  .game.dropping {
-    border-color: var(--demo-drop-active-border, var(--demo-accent2, #0284c7));
-    background: var(--demo-drop-active-bg, rgba(255, 255, 255, 0.4));
-  }
-
-  .game header {
+    width: min(58rem, 100%);
     display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.5rem;
+    flex-direction: column;
+    align-items: center;
+    gap: clamp(0.6rem, 2.2vh, 1.4rem);
+    color: #fff;
+    text-align: center;
   }
 
-  .game .tag {
-    font-family: var(--demo-font-mono, monospace);
-    font-size: 0.8rem;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--demo-accent, #ff007f);
+  /* One grid cell holding both wordmarks; `rsdk-start-drop-in` (theme.rsdkv4.css)
+     plays on whichever is current, so switching game drops its logo in. The
+     title's own animation would double that, hence `animation: none`. */
+  .launcher-title {
+    display: grid;
+    animation: none;
   }
 
-  .game .year {
-    font-family: var(--demo-font-mono, monospace);
-    font-size: 0.75rem;
-    color: var(--demo-muted, #475569);
+  .launcher-title .rsdk-start-logo {
+    grid-area: 1 / 1;
+    width: min(28rem, 56vw);
+    max-height: 22vh;
+    opacity: 0;
+    transition: opacity 200ms ease;
   }
 
-  .game h3 {
-    margin: 0;
-    font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    color: var(--demo-text, #0f172a);
+  .launcher-title .rsdk-start-logo.is-active {
+    opacity: 1;
   }
 
-  .game .state {
-    margin: 0;
-    min-height: 1.1rem;
-    font-family: var(--demo-font-mono, monospace);
-    font-size: 0.75rem;
-    color: var(--demo-text, #0f172a);
+  @media (prefers-reduced-motion: no-preference) {
+    .launcher-title .rsdk-start-logo.is-active {
+      animation: rsdk-start-drop-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+  }
+
+  /* Chrome sizes a wrapping flex container to its widest item when it is itself
+     a shrink-to-fit box (which the centred column makes it), so the two cards
+     would sit on top of each other; the row needs the width spelled out. */
+  .launcher .rsdk-start-grid {
+    width: 100%;
+  }
+
+  /* A launcher card holds more than a save card: cover art, the file buttons and
+     a footer rail — so it is wider and sizes to its contents. */
+  .rsdk-start-card--game {
+    width: min(19rem, 100%);
+    min-height: 0;
+    gap: 5px;
+  }
+
+  /* An empty slot reads as a drop target. Only while it is neither selected nor
+     under the pointer, though — the gold frame those states put on every card is
+     what says "this one", and it must not be traded for the dashed outline. */
+  .rsdk-start-card--game[data-state='empty'] {
+    background: var(--s1-navy-deep, #080e38);
+  }
+
+  .rsdk-start-card--game[data-state='empty']:not(.is-selected):not(:hover):not(:focus-visible) {
+    border-style: dashed;
+    border-color: rgba(255, 255, 255, 0.5);
+  }
+
+  /* A pack hovering over the card: same lift as the selection, in grass green. */
+  .rsdk-start-card--game.is-dropping {
+    border-style: solid;
+    border-color: var(--s1-green-lit, #58e058);
+    transform: translateY(-4px);
+    box-shadow: 0 10px 0 rgba(0, 0, 0, 0.45), 0 0 22px rgba(0, 184, 48, 0.45);
+  }
+
+  .rsdk-start-card--game .rsdk-start-art {
+    min-height: 7rem;
+    padding: 0.85rem 0.75rem;
+  }
+
+  .game-cover {
+    width: 100%;
+    max-height: 5rem;
+    object-fit: contain;
+    /* The card is the drop target; the art must not swallow the drag events. */
+    pointer-events: none;
+    filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.45));
+  }
+
+  .rsdk-start-card--game[data-state='empty'] .game-cover {
+    opacity: 0.45;
+    filter: grayscale(0.7) drop-shadow(0 3px 0 rgba(0, 0, 0, 0.45));
+  }
+
+  /* The save select shouts the stage name here; this line is a storage path, so
+     it keeps the case it is stored under. */
+  .launcher .rsdk-start-card--game .rsdk-start-where {
+    padding: 0.1rem 0.35rem;
+    font-size: 0.66rem;
+    letter-spacing: 0;
+    text-transform: none;
     word-break: break-all;
-  }
-
-  .game .state.empty {
-    color: var(--demo-muted, #475569);
   }
 
   .actions {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: 0.35rem;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.1rem 0 0.4rem;
   }
 
   .picker {
     display: inline-flex;
     background: var(--demo-picker-bg, rgba(255, 255, 255, 0.5));
-    color: var(--demo-picker-text, var(--demo-text, #0f172a));
+    color: var(--demo-picker-text, #fff);
     border: 1px solid var(--demo-picker-border, rgba(255, 255, 255, 0.6));
-    border-radius: var(--demo-subpanel-radius, 8px);
-    padding: 0.45rem 0.9rem;
+    border-radius: var(--demo-subpanel-radius, 3px);
+    padding: 0.35rem 0.7rem;
     cursor: pointer;
     text-transform: uppercase;
     font-weight: 600;
-    font-size: 0.8rem;
+    font-size: 0.7rem;
     letter-spacing: 0.05em;
     transition: all 0.2s;
   }
@@ -330,64 +364,61 @@
     display: inline-flex;
     align-items: center;
     background: rgba(239, 68, 68, 0.15);
-    color: #ef4444;
-    border: 1px solid rgba(239, 68, 68, 0.4);
-    border-radius: var(--demo-subpanel-radius, 8px);
-    padding: 0.45rem 0.8rem;
+    color: #ff8b8b;
+    border: 1px solid rgba(239, 68, 68, 0.5);
+    border-radius: var(--demo-subpanel-radius, 3px);
+    padding: 0.35rem 0.7rem;
     cursor: pointer;
     text-transform: uppercase;
     font-weight: 600;
-    font-size: 0.8rem;
+    font-size: 0.7rem;
     letter-spacing: 0.05em;
     transition: all 0.2s;
   }
 
   .remove-btn:hover {
     background: rgba(239, 68, 68, 0.3);
-    border-color: rgba(239, 68, 68, 0.8);
-    color: #dc2626;
+    border-color: rgba(239, 68, 68, 0.9);
+    color: #fff;
   }
 
-  .launch-btn {
-    width: 100%;
-    padding: 0.9rem 1.5rem;
-    font-size: 1.1rem;
+  /* Footer rail, in the place (and the black) the save cards give the emeralds. */
+  .game-rail {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-top: auto;
+    padding: 0.3rem 0.5rem;
+    background: #000;
+    color: var(--s1-gold, #ffd800);
+    font-size: 0.62rem;
     font-weight: 700;
-    font-family: var(--demo-font-sans, sans-serif);
+    letter-spacing: 0.14em;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--demo-launch-text, #ffffff);
-    background: var(--demo-launch-bg, var(--demo-accent, #ff007f));
-    border: none;
-    border-radius: var(--demo-subpanel-radius, 8px);
-    cursor: pointer;
-    transition: all 0.2s ease;
-    box-shadow: var(--demo-accent-glow, 0 0 15px rgba(255, 0, 127, 0.3));
   }
 
-  .launch-btn:hover:not(:disabled) {
-    filter: brightness(1.1);
-    transform: translateY(-1px);
+  /* These two sit over the checkered ground, which is busy — hence the shadow. */
+  .launcher-status,
+  .launcher-keys {
+    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.55);
   }
 
-  .launch-btn:active:not(:disabled) {
-    transform: translateY(0);
+  .launcher-status {
+    min-height: 1.1rem;
+    color: #fff;
   }
 
-  .launch-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    box-shadow: none;
-    background: var(--demo-muted, #475569);
+  .launcher-keys {
+    opacity: 0.75;
   }
 
-  .status {
-    min-height: 1.2rem;
-    color: var(--demo-text, #0f172a);
-    font-family: var(--demo-font-mono, monospace);
-    font-size: 0.85rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    opacity: 0.8;
+  .sdk {
+    width: 100%;
+    border: 1px solid var(--demo-subpanel-border, rgba(255, 255, 255, 0.3));
+    border-radius: var(--demo-subpanel-radius, 3px);
+    padding: 1rem 1.25rem;
+    background: var(--demo-subpanel-bg, rgba(255, 255, 255, 0.35));
+    box-shadow: var(--demo-subpanel-shadow, inset 0 0 0 1px rgba(255, 255, 255, 0.6));
+    text-align: left;
   }
 </style>

@@ -104,12 +104,6 @@
 
     const startScreens = { mount: mountStartScreens }
 
-    // Logos for the save-select screen (src/demo/assets, copied to dist/assets
-    // by the Makefile). A game without one just gets its name in type.
-    const GAME_LOGOS = {
-      Sonic1: './assets/Sonic_The_Hedgehog.svg',
-    }
-
     demo
       .init({
         messages: {
@@ -189,9 +183,12 @@
         // instead of the engine's own text menus (which is why it boots with
         // skipStartMenu). It pauses the engine while it is up and starts the
         // game on the way out.
+        // The wordmark is the library's (src/demo/library.ts), the same one the
+        // launcher just showed — so the screen the player lands on carries the
+        // logo of the card they picked.
         startScreens.mount(e.attachTo, instance, {
           title: game.title,
-          logo: GAME_LOGOS[game.id],
+          logo: game.logo,
         })
 
         return instance
