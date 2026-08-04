@@ -165,13 +165,33 @@ export function mountStartScreens(
   ];
 
   /**
+   * Which card the keyboard is on.
+   *
+   * Tracked here rather than read back from `document.activeElement`: the keys
+   * are handled at the window, so they keep working after a click lands on the
+   * backdrop (or anywhere else that takes focus away) — but Enter would then
+   * have had no focused button to activate, which is exactly how "the arrows
+   * work but Enter does nothing" happens.
+   */
+  let selected = 0;
+
+  const highlight = (index: number): void => {
+    const all = cards();
+    if (!all.length) return;
+    selected = (index + all.length) % all.length;
+    all.forEach((card, i) => card.classList.toggle('is-selected', i === selected));
+    all[selected]?.focus({ preventScroll: false });
+  };
+
+  /**
    * Left/right picks the file, up/down picks who to play as — the two axes of
    * the same screen, so a player never has to leave it. Up/down does nothing on
    * a used file: its character came with the save.
    */
   function onKeyDown(event: KeyboardEvent): void {
     if (!root.isConnected) return;
-    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Escape'].includes(event.key)) return;
+    const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter', ' ', 'Escape'];
+    if (!keys.includes(event.key)) return;
 
     // The engine is paused behind this screen and the pause menu would only get
     // in the way, so the overlay keeps these keys to itself.
@@ -181,17 +201,21 @@ export function mountStartScreens(
 
     const all = cards();
     if (!all.length) return;
-    const current = all.indexOf(document.activeElement as HTMLButtonElement);
 
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-      const step = event.key === 'ArrowLeft' ? -1 : 1;
-      all[current < 0 ? 0 : (current + step + all.length) % all.length]?.focus();
+      highlight(selected + (event.key === 'ArrowLeft' ? -1 : 1));
       return;
     }
 
-    const card = all[current < 0 ? 0 : current];
-    card?.focus();
-    cycleCharacter(card, event.key === 'ArrowUp' ? -1 : 1);
+    if (event.key === 'Enter' || event.key === ' ') {
+      // Activated here rather than left to the browser's default action on a
+      // focused button, so it works from wherever the focus happens to be.
+      all[selected]?.click();
+      return;
+    }
+
+    highlight(selected);
+    cycleCharacter(all[selected], event.key === 'ArrowUp' ? -1 : 1);
   }
 
   window.addEventListener('keydown', onKeyDown, true);
@@ -243,7 +267,10 @@ export function mountStartScreens(
         })(),
         emeraldRow(emeraldCount(slot.emeralds)),
       );
-      card.addEventListener('click', () => start(slot.slot, slot.character));
+      card.addEventListener('click', () => {
+        highlight(cards().indexOf(card));
+        start(slot.slot, slot.character);
+      });
       return card;
     }
 
@@ -266,6 +293,7 @@ export function mountStartScreens(
     // Clicking an arrow cycles instead of starting — the arrows live inside the
     // card button (spans, so the markup stays valid), so the click is routed here.
     card.addEventListener('click', (event) => {
+      highlight(cards().indexOf(card));
       const arrow = (event.target as HTMLElement).closest<HTMLElement>('.rsdk-start-arrow');
       if (arrow) {
         cycleCharacter(card, Number(arrow.dataset.step));
@@ -279,7 +307,7 @@ export function mountStartScreens(
 
   const slots = engine.game.saveSlots();
   grid.append(buildCard(NO_SAVE), ...(slots.length ? slots : EMPTY_SLOTS).map((s) => buildCard(s)));
-  cards()[0]?.focus();
+  highlight(0);
 
   return teardown;
 }

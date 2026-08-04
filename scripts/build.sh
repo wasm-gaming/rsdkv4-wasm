@@ -199,6 +199,14 @@ void web_devmenu_load_stage(int listIdx, int stageIdx)
     if (stageIdx < 0 || stageIdx >= stageListCount[listIdx])
         return;
 
+    // Silence the stage being left. A scene that plays its own music covers for
+    // this by starting a new track, but the ones a pause menu warps to most —
+    // the stage menu, level select — do not, so the previous zone's music kept
+    // playing over them. InitStartingStage() does exactly this before a load.
+    StopMusic();
+    StopAllSfx();
+    ReleaseStageSfx();
+
     activeStageList   = listIdx;
     stageListPosition = stageIdx;
     stageMode         = STAGEMODE_LOAD;

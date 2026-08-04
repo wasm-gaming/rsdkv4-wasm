@@ -279,13 +279,14 @@ main.running {
 }
 
 /* Only the highlighted file shows its arrows, as in Mania. */
-.rsdk-start-card:not(:hover):not(:focus-visible) .rsdk-start-arrow {
+.rsdk-start-card:not(.is-selected):not(:hover):not(:focus-visible) .rsdk-start-arrow {
   opacity: 0.28;
 }
 
 /* The highlighted file lifts and takes a gold frame, like Mania's. The card is
  * the button, so this is a plain :focus-visible / :hover — and `outline: none`
  * replaces the browser ring, which the frame already says louder. */
+.rsdk-start-card.is-selected,
 .rsdk-start-card:focus-visible,
 .rsdk-start-card:hover {
   outline: none;

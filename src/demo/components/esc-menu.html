@@ -183,6 +183,16 @@
           }
         }
       } else if (key === "Enter") {
+        // Local change: this handler has already cancelled the event, so the
+        // browser will not press a focused button for us — do it here, or
+        // tabbing to a jump button and hitting Enter would close the menu
+        // instead of running it.
+        let node = document.activeElement;
+        while (node?.shadowRoot?.activeElement) node = node.shadowRoot.activeElement;
+        if (node && node.tagName === "BUTTON") {
+          node.click();
+          return;
+        }
         onClose?.();
       }
     }
