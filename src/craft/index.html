@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>RSDKv4 SDK — craft demo</title>
+
+  <!-- Cross-origin isolation. The engine is built with threads, and OPFS
+       persistence needs them; a static host that cannot send COOP/COEP gets the
+       headers from this service worker instead. It may reload the page once, so
+       it goes first. Drop it if your server sends the headers (see dist/_headers)
+       — the demo still runs without it, just without persistent saves. -->
+  <script src="../coi.js"></script>
+
+  <!-- The demo imports the SDK by package name, the way a real host would; the
+       import map points that at the built files in dist/rsdkv4/. -->
+  <script type="importmap">
+    {
+      "imports": {
+        "@wasm-gaming/rsdkv4-wasm": "../rsdkv4/rsdkv4.sdk.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <main></main>
+  <script type="module" src="./craft.js"></script>
+</body>
+</html>

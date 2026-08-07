@@ -1,0 +1,33 @@
+
+<script :setup=",{ Component79, $reactive }">
+    console.log('Component79 version is ', Component79.version);
+
+    const [
+        CHeader,
+        DropForm,
+        CFooter,
+    ] = await Component79.fetchAll([
+        './layout/header.html',
+        './components/DropForm.html',
+        './layout/footer.html',
+    ]);
+
+    const store = $reactive({
+      files: [],
+    });
+
+    function onFiles(event) {
+      // component events arrive as a CustomEvent; the payload is in .detail
+      const files = event.detail;
+      console.log('Files dropped:', files);
+      store.files = Array.from(files);
+    }
+</script>
+
+<CHeader />
+<section main>
+  <DropForm
+    @files="onFiles"
+  />
+</section>
+<CFooter />
