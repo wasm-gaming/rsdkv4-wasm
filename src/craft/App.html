@@ -1,27 +1,35 @@
 
-<script :setup=",{ Component79, $reactive }">
-    console.log('Component79 version is ', Component79.version);
+<script :setup>
+  const { opfsService } = await import('./services/opfs.service.js');
 
-    const [
-        CHeader,
-        DropForm,
-        CFooter,
-    ] = await Component79.fetchAll([
-        './layout/header.html',
-        './components/DropForm.html',
-        './layout/footer.html',
-    ]);
+  console.log('Component79 version is ', Component79.version);
 
-    const store = $reactive({
-      files: [],
-    });
+  const [
+      CHeader,
+      DropForm,
+      CFooter,
+  ] = await Component79.fetchAll([
+      './layout/header.html',
+      './components/DropForm.html',
+      './layout/footer.html',
+  ]);
 
-    function onFiles(event) {
-      // component events arrive as a CustomEvent; the payload is in .detail
-      const files = event.detail;
-      console.log('Files dropped:', files);
-      store.files = Array.from(files);
+  await opfsService.readFilesInOPFS();
+
+  const store = $reactive({
+    files: [...opfsService.filesInOPFS],
+  });
+
+  const onFiles = async ({ detail: files }) => {
+    console.log('Files dropped:', files);
+
+    for (const file of files) {
+      await opfsService.writeFileToOPFS(file);
     }
+    // re-read rather than append, so dropping the same name twice doesn't
+    // duplicate the row that OPFS just overwrote
+    store.files = await opfsService.readFilesInOPFS();
+  }
 </script>
 
 <CHeader />
@@ -29,5 +37,9 @@
   <DropForm
     @files="onFiles"
   />
+
+  <ul>
+    <li :each="file in store.files">{{file.name}}</li>
+  </ul>
 </section>
 <CFooter />

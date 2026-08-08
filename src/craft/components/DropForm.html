@@ -1,7 +1,6 @@
 
-<script :setup=",{ $emit, $updateModel }">
+<script :setup>
   let isDragOver = false;
-  $: $updateModel('isDragOver', isDragOver);
 
   const on = {
     dragenter: (event) => { isDragOver = true },
@@ -9,11 +8,17 @@
         if (isDragOver) return
         isDragOver = true;
     },
-    dragleave: (event) => { isDragOver = false },
+    dragleave: (event) => {
+      // dragleave also fires when the cursor crosses onto a child (the <input>
+      // covering the form, the <p>); only the one that leaves the form counts
+      if (event.currentTarget.contains(event.relatedTarget)) return
+      isDragOver = false
+    },
     drop: (event) => {
       isDragOver = false;
       $emit('files', event.dataTransfer.files);
     },
+    submit: (files) => { $emit('files', files) },
   }
 </script>
 
