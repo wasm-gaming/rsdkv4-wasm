@@ -2,6 +2,13 @@
 <script :setup>
   const { opfsService } = await import('./services/opfs.service.js');
 
+  // The id doubles as the OPFS folder name under rsdkv4/, so it has to match the
+  // SDK's casing (src/demo/library.ts GAMES) — OPFS is case-sensitive.
+  const filesCRC32 = {
+    '5fcb0c89': 'Sonic1',
+    '4b801b09': 'Sonic2',
+  }
+
   console.log('Component79 version is ', Component79.version);
 
   const [
@@ -17,18 +24,39 @@
   await opfsService.readFilesInOPFS();
 
   const store = $reactive({
-    files: [...opfsService.filesInOPFS],
+    loading: true,
+    present: {
+      Sonic1: false,
+      Sonic2: false,
+    },
+  });
+
+  Object.keys(store.present).forEach((game) => {
+    opfsService.readFileFromOPFS(`${game}/Data.rsdk`).then((file) => {
+      store.present[game] = true;
+    }).catch((error) => {
+      store.present[game] = false;
+    });
   });
 
   const onFiles = async ({ detail: files }) => {
     console.log('Files dropped:', files);
 
     for (const file of files) {
-      await opfsService.writeFileToOPFS(file);
+      // await opfsService.writeFileToOPFS(file);
+      const fileCRC32 = await opfsService.calculateFileCRC32(file);
+      console.log(`File ${file.name} has CRC32: ${fileCRC32}`);
+      const game = filesCRC32[fileCRC32];
+
+      if (game) {
+        console.log(`File ${file.name} matches known file: ${game}`);
+        await opfsService.writeFileToOPFS(file, `${game}/Data.rsdk`);
+        store.present[game] = true;
+      }
     }
     // re-read rather than append, so dropping the same name twice doesn't
     // duplicate the row that OPFS just overwrote
-    store.files = await opfsService.readFilesInOPFS();
+    // store.files = await opfsService.readFilesInOPFS();
   }
 </script>
 
@@ -38,8 +66,13 @@
     @files="onFiles"
   />
 
-  <ul>
-    <li :each="file in store.files">{{file.name}}</li>
-  </ul>
+  <div class="library">
+    <h2>Library</h2>
+    <ul>
+      <li :each="(present, game) in store.present" :key="game">
+        {{ game }}: {{ store.present[game] ? 'Present' : 'Missing' }}
+      </li>
+    </ul>
+  </div>
 </section>
 <CFooter />

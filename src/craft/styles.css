@@ -1,0 +1,58 @@
+
+:root {
+    --font-family: 'Inter', sans-serif;
+    --font-size: 16px;
+    --line-height: 1.5;
+    --text-color: #333;
+    --background-color: #f9f9f9;
+
+    /* --- Mega Drive palette ------------------------------------------------ */
+    --s1-sky: #0058c8;        /* upper Green Hill sky   */
+    --s1-sky-low: #58c0f8;    /* horizon haze           */
+    --s1-navy: #101c60;       /* title screen / HUD navy*/
+    --s1-navy-deep: #080e38;
+    --s1-blue: #2044d8;       /* Sonic sprite blue      */
+    --s1-blue-lit: #4c84f8;   /* sprite highlight       */
+    --s1-gold: #ffd800;       /* ring                   */
+    --s1-gold-deep: #e0a000;
+    --s1-green: #00b830;      /* Green Hill grass       */
+    --s1-green-lit: #58e058;
+    --s1-dirt: #b85818;       /* checkered ground, dark */
+    --s1-dirt-lit: #f0a038;   /* checkered ground, lit  */
+
+    /* --- Background: Green Hill sky ---------------------------------------- */
+    --demo-bg-a: var(--s1-sky);
+    --demo-bg-b: var(--s1-sky-low);
+    --demo-bg-gradient: linear-gradient(180deg, var(--demo-bg-a) 0%, var(--demo-bg-b) 100%);
+    --demo-bg-radial-1: rgba(255, 255, 255, 0.22); /* cloud bank */
+    --demo-bg-radial-2: rgba(255, 216, 0, 0.16);   /* low sun     */
+}
+
+html {
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    line-height: var(--line-height);
+    color: var(--text-color);
+}
+
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: radial-gradient(circle at 15% 50%, var(--demo-bg-radial-1), transparent 45%), radial-gradient(circle at 85% 30%, var(--demo-bg-radial-2), transparent 50%), var(--demo-bg-gradient);
+    background-attachment: fixed;
+}
+
+body::before {
+    content: "";
+    position: fixed;
+    inset: auto 0 0 0;
+    height: clamp(140px, 26vh, 260px);
+    z-index: 0;
+    pointer-events: none;
+    background: /* grass lip */ linear-gradient(180deg, var(--s1-green-lit) 0, var(--s1-green-lit) 6px, var(--s1-green) 6px, var(--s1-green) 26px, transparent 26px), /* checkered dirt */ repeating-conic-gradient(var(--s1-dirt) 0% 25%, var(--s1-dirt-lit) 0% 50%) 0 26px / 32px 32px;
+}
