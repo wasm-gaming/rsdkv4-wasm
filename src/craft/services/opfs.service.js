@@ -70,7 +70,7 @@ export const opfsService = {
         return [...files];
     },
     /** `path` is the destination including the name: (file, 'Sonic1/Data.rsdk'). */
-    writeFileToOPFS: async (file, path = file.name) => {
+    writeFileToOPFS: async (path, file) => {
         const { dir, name } = await fileAt(path, true);
         const fileHandle = await dir.getFileHandle(name, { create: true });
         const writable = await fileHandle.createWritable();
@@ -85,6 +85,8 @@ export const opfsService = {
             await writable.abort().catch(() => {});
             throw error;
         }
+        
+        opfsTree()
     },
     readFileFromOPFS: async (path) => {
         const { dir, name } = await fileAt(path);
@@ -119,3 +121,24 @@ export const opfsService = {
         return ((crc ^ 0xffffffff) >>> 0).toString(16).padStart(8, '0');
     },
 };
+
+async function opfsTree(dirHandle = null, indent = '') {
+  const root = dirHandle ?? await navigator.storage.getDirectory();
+
+  // Devuelve también una estructura de datos, no solo el print
+  const tree = { name: root.name || 'OPFS root', kind: 'directory', children: [] };
+
+  for await (const [name, handle] of root.entries()) {
+    if (handle.kind === 'directory') {
+      console.log(`${indent}📁 ${name}/`);
+      const subtree = await opfsTree(handle, indent + '  ');
+      tree.children.push(subtree);
+    } else {
+      const file = await handle.getFile();
+      console.log(`${indent}📄 ${name} (${file.size} bytes)`);
+      tree.children.push({ name, kind: 'file', size: file.size });
+    }
+  }
+
+  return tree;
+}

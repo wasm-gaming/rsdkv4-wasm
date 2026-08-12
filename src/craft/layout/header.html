@@ -1,4 +1,52 @@
 
+<script :setup>
+  const { gameService = { games: {} } } = await import('../services/game.service.js');
+
+    const selectGame = (gameId) => {
+        if (gameService.games[gameId]?.loaded) {
+            gameService.selectGame(gameId);
+        } else {
+            showOpenFilePicker({
+                types: [
+                    {
+                        description: 'RSDKv4 Game Data',
+                        accept: {
+                            'application/octet-stream': ['.rsdk'],
+                        },
+                    },
+                ],
+            })
+                .then(async (fileHandles) => {
+                    if (fileHandles.length > 0) {
+                        const fileHandle = fileHandles[0];
+                        const file = await fileHandle.getFile();
+
+                        await gameService.addDataFile(file, gameId);
+                    }
+                }, (error) => {
+                    if (error instanceof DOMException && error.name === 'AbortError') {
+                        console.log('File selection was canceled.');
+                    } else {
+                        console.error('Error selecting file:', error);
+                    }
+                });
+        }
+    };
+</script>
+
 <header>
-    <h1>My App</h1>
+    <div container>
+        RSDKv4
+    </div>
 </header>
+
+<style scoped>
+  header {
+    display: flex;
+    align-items: center;
+    height: 60px;
+    background-color: #333;
+    color: #fff;
+    padding: 0 1rem;
+  }
+</style>
