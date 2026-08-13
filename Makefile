@@ -20,7 +20,7 @@ PORT ?= 8024
 # adds index.html + theme.rsdkv4.css on top of it.
 SPECS_DEMO := node_modules/@wasm-gaming/engine-specs/demo
 
-.PHONY: build build-sdk build-lib build-manifest build-demo build-wasm \
+.PHONY: build build-sdk build-lib build-manifest build-demo build-vanilla build-craft build-wasm \
 	preview preview.single typecheck test release-check i install \
 	clean clean-all help
 
@@ -35,7 +35,7 @@ node_modules: package.json
 
 build: build-sdk build-wasm ## Full build → dist/ (TypeScript + WASM)
 
-build-sdk: build-lib build-manifest build-demo ## TypeScript → dist/ (no WASM)
+build-sdk: build-lib build-manifest build-demo build-vanilla ## TypeScript → dist/ (no WASM)
 
 build-lib: node_modules ## Compile SDK/options/manifest → dist/rsdkv4/
 	$(BIN)/tsc -p tsconfig.json
@@ -64,6 +64,20 @@ build-demo: build-lib ## Compile demo → dist/{demo.js,index.html}; copy shared
 	cp src/demo/coi.js dist/coi.js
 	cp src/demo/_headers dist/_headers
 	node scripts/seed-settings.mjs
+	$(MAKE) build-vanilla
+	$(MAKE) build-craft
+
+build-vanilla: ## Copy the no-build demo → dist/vanilla/ (served at /vanilla/)
+	# Plain JS + HTML, nothing to compile: it imports the built SDK through an
+	# import map, so a copy is the whole "build". Edit src/vanilla and reload.
+	rm -rf dist/vanilla
+	cp -R src/vanilla dist/vanilla
+
+build-craft: ## Copy the no-build demo → dist/craft/ (served at /craft/)
+	# Plain JS + HTML, nothing to compile: it imports the built SDK through an
+	# import map, so a copy is the whole "build". Edit src/craft and reload.
+	rm -rf dist/craft
+	cp -R src/craft dist/craft
 
 build-wasm: ## WASM via emscripten/emsdk (Docker) → dist/rsdkv4/rsdkv4.{js,wasm}
 	bash scripts/build-docker.sh

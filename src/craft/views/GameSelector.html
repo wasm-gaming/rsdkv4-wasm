@@ -1,0 +1,193 @@
+
+<script :setup>
+  const { gameService = { games: {} } } = await import('../services/game.service.js');
+
+    const selectGame = (gameId) => {
+      if (gameId === null) {
+        gameService.selectGame(null)
+      } else if (gameService.games[gameId]?.loaded) {
+        const selectedGame = gameService.selectedGame
+
+        gameService.selectGame(
+          selectedGame?.id === gameId
+            ? null
+            : gameId
+        );
+      } else {
+          showOpenFilePicker({
+              types: [
+                  {
+                      description: 'RSDKv4 Game Data',
+                      accept: {
+                          'application/octet-stream': ['.rsdk'],
+                      },
+                  },
+              ],
+          })
+              .then(async (fileHandles) => {
+                  if (fileHandles.length > 0) {
+                      // $emit('files',
+                      //     await fileHandles.reduce(async (accPromise, fileHandle) => {
+                      //         const acc = await accPromise;
+                      //         const file = await fileHandle.getFile();
+                      //         acc.push(file);
+                      //         return acc;
+                      //     }, Promise.resolve([]))
+                      // );
+                      const fileHandle = fileHandles[0];
+                      const file = await fileHandle.getFile();
+                      // await gameService.loadGameFromFile(file);
+
+                      await gameService.addDataFile(file, gameId);
+                  }
+              }, (error) => {
+                  if (error instanceof DOMException && error.name === 'AbortError') {
+                      console.log('File selection was canceled.');
+                  } else {
+                      console.error('Error selecting file:', error);
+                  }
+              });
+      }
+    };
+</script>
+
+<section game-seletor>
+    <div container>
+      <button logo @click="selectGame(null)">
+        <img src="/craft/assets/Logo_Sonic.svg" alt="Sonic the Hedgehog" />
+      </button>
+    </div>
+    <div game-choose>
+        <div game
+            :each="gameId in ['Sonic1', 'Sonic2']"
+            :disabled="!gameService.games[gameId]?.loaded"
+            :active="gameService.selectedGame?.id && gameService.selectedGame.id === gameId || null"
+        >
+            <img bg :src="`/craft/assets/${gameId}.svg`" alt="Sonic the Hedgehog" />
+            <img fg :src="`/craft/assets/${gameId}.svg`" alt="Sonic the Hedgehog" />
+            <button
+                @click="() => console.log(gameId) || selectGame(gameId)"
+            />
+        </div>
+    </div>
+</section>
+
+<style scoped>
+  section[game-seletor] {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 960px;
+    max-width: 100%;
+    margin: 0 auto;
+  }
+  /* section[game-seletor] {
+    display: flex;
+    align-items: center;
+    height: 60px;
+    background-color: #333;
+    color: #fff;
+    padding: 0 1rem;
+  } */
+
+  /* [container] {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 100%;
+    width: 960px;
+    max-width: 100%;
+    margin: 0 auto;
+  } */
+
+  h1 {
+    font-size: 1.5rem;
+    margin: 0;
+  }
+
+  [logo] {
+    all: unset;
+    box-sizing: border-box;
+    height: 100%;
+    width: 450px;
+    cursor: pointer;
+
+    img {
+      display: block;
+      width: 450px;
+      aspect-ratio: 300 / 123;
+    }
+  }
+
+  [game-choose] {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    height: 100%;
+    padding-top: 1rem;
+
+    [game] {
+        background: none;
+        border: none;
+        cursor: pointer;
+        transition: transform 0.1s ease-in-out;
+
+        position: relative;
+
+        button {
+            position: absolute;
+            inset: 0;
+            appearance: none;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        img {
+            display: block;
+            width: auto;
+            height: 11.5rem;
+        }
+
+        img[bg] {
+            filter: grayscale(100%) brightness(0.5);
+        }
+        img[fg] {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: .5;
+            /* transition: opacity 0.1s ease-in-out; */
+        }
+
+        &[active] img[bg] {
+            opacity: 1;
+            /* filter: drop-shadow(3px 5px 2px rgb(0 0 0 / 0.4)) */
+            filter: drop-shadow(3px 0px 0 white)
+                    drop-shadow(-3px 0px 0 white)
+                    drop-shadow(0px 3px 0 white)
+                    drop-shadow(0px -3px 0 white);
+        }
+
+        &[disabled] {
+          img[fg] {
+            opacity: 0;
+          }
+          &:hover:not(:active) img[fg] {
+              opacity: .5;
+          }
+        }
+        &:not([disabled]) {
+          img[fg] {
+            opacity: .8;
+          }
+          &:hover:not(:active) img[fg] {
+            opacity: 1;
+          }
+        }
+    }
+  }
+</style>

@@ -1,0 +1,67 @@
+
+<script :setup>
+  let isDragOver = false;
+
+  const on = {
+    dragenter: (event) => { isDragOver = true },
+    dragover: (event) => {
+        if (isDragOver) return
+        isDragOver = true;
+    },
+    dragleave: (event) => {
+      // dragleave also fires when the cursor crosses onto a child (the <input>
+      // covering the form, the <p>); only the one that leaves the form counts
+      if (event.currentTarget.contains(event.relatedTarget)) return
+      isDragOver = false
+    },
+    drop: (event) => {
+      isDragOver = false;
+      $emit('files', event.dataTransfer.files);
+    },
+    submit: (files) => { $emit('files', files) },
+  }
+</script>
+
+<form
+  :class="{ 'drag-over': isDragOver }"
+  @submit.prevent="on.submit($event.target.elements.files.files)"
+  @dragenter.prevent="on.dragenter"
+  @dragover.prevent="on.dragover"
+  @dragleave.prevent="on.dragleave"
+  @drop.prevent="on.drop"
+>
+  <input type="file" name="files" multiple @change="on.submit($event.target.files)" />
+  <p>{{
+      isDragOver ? 'Drop files here' : 'Drag and drop files here'
+  }}</p>
+</form>
+
+<style scoped>
+  form {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    position: relative;
+    border: 2px dashed #ccc;
+    border-radius: 10px;
+
+    &:hover, &.drag-over {
+      border-color: #999;
+    }
+
+    &:active, &.drag-over {
+      border-color: #666;
+    }
+  }
+  input[type="file"] {
+    appearance: none;
+    opacity: 0;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+  }
+</style>

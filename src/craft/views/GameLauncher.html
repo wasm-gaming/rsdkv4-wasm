@@ -1,0 +1,204 @@
+
+<script :setup>
+    const { gameService: { selectedGame } } = await import('../services/game.service.js');
+
+    const players = [
+        'sonic',
+        'tails',
+        'knuckles',
+        'sonictails',
+    ]
+    let selectedPlayer = [0, 1, 2, 3]
+
+    const nextPlayer = (i) => {
+        const nextPlayer = selectedPlayer[i] + 1
+
+        selectedPlayer[i] = players[nextPlayer]
+            ? nextPlayer
+            : 0
+    }
+
+    console.log('selectedGame', selectedGame)
+</script>
+
+<section game-launcher>
+    <div slot-cards>
+        <button
+            type="button"
+            slot-card no-save
+            @click="$emit('launch', {
+                slot: null,
+                player: 1,
+            })"
+        >
+            NO SAVE
+        </button>
+
+        <div :each="slotNum, i in [1, 2, 3, 4]" slot-card in-memory>
+            <button type="button" player-choose @click="nextPlayer(i)" :player="players[selectedPlayer[i]]">
+                <img :src="`./assets/player-${players[selectedPlayer[i]]}.svg`" />
+            </button>
+            <button type="button" play @click="$emit('launch', {
+                slot: i - 1,
+                player: selectedPlayer[i],
+            })">
+                PLAY
+            </button>
+        </div>
+    </div>
+</section>
+
+<style>
+    :root {
+        --player-bg-grey: rgba(180, 180, 180, .2);
+        --player-bg-sonic: rgba(13, 122, 233, .2);
+        --player-bg-tails: rgba(241, 176, 0, .2);
+        --player-bg-knuckles: rgba(255, 20, 0, .2);
+        --player-bg-sonictails: rgba(160, 32, 240, .2);
+    }
+
+    @keyframes player-bg {
+        0% { left: 30%; right: 20%; }
+        10% { left: 50%; right: 50%; }
+        20% { left: 10%; right: 20%; }
+        30% { left: 60%; right: 40%; }
+        40% { left: 70%; right: 10%; }
+        50% { left: 20%; right: 80%; }
+        60% { left: 10%; right: 0; }
+        60% { left: 0; right: 60%; }
+        70% { left: 40%; right: 10%; }
+        80% { left: 10%; right: 70%; }
+        90% { left: 80%; right: 0; }
+        100% { left: 30%; right: 20%; }
+    }
+
+    [game-launcher] {
+        display: flex;
+        justify-content: center;
+        align-items: flex-end;
+        height: 100%;
+        transform: translateY(2rem);
+        position: relative;
+        z-index: 1;
+    }
+
+    [slot-cards] {
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        gap: 1.5rem;
+        margin-bottom: -2rem;
+    }
+
+    [slot-card] {
+        width: 170px;
+        height: 220px;
+        background: #333;
+        color: white;
+        appearance: none;
+        border-radius: .5rem;
+        border: 2px solid black;
+
+        &[no-save] {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 130px;
+            cursor: pointer;
+
+            &:hover:not(:active) {
+                background: #222;
+            }
+        }
+    }
+
+    [slot-card][in-memory] {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        padding: .75rem;
+
+        button[player-choose] {
+            all: unset;
+            box-sizing: border-box;
+            width: 100%;
+            padding: 1rem .5rem 0;
+            cursor: pointer;
+            background: #ddd;
+            background: white;
+            aspect-ratio: 1 / 1;
+            transition: padding .05s linear;
+            position: relative;
+
+            &::before, &::after {
+                content: '';
+                position: absolute;
+                inset: 0 1rem 0 3rem;
+                background: var(--player-bg-grey);
+                z-index: 0;
+            }
+
+            &:hover {
+                background-color: white;
+
+                &::before {
+                    animation: player-bg 20s linear;
+                    animation-iteration-count: infinite;
+                }
+                &::after {
+                    animation: player-bg 30s linear;
+                    animation-direction: reverse;
+                    animation-iteration-count: infinite;
+                }
+            }
+
+            &[player=sonic]::after {
+                background: var(--player-bg-sonic);
+                left: 30%; right: 20%;
+            }
+            &[player=tails]::after {
+                background: var(--player-bg-tails);
+                animation-delay: -5s;
+                left: 40%; right: 10%;
+            }
+            &[player=knuckles]::after {
+                background: var(--player-bg-knuckles);
+                animation-delay: -10s;
+                left: 20%; right: 30%;
+            }
+            &[player=sonictails]::after {
+                background: var(--player-bg-sonictails);
+                animation-delay: -15s;
+                left: 20%; right: 70%;
+            }
+
+            img {
+                position: relative;
+                z-index: 1;
+            }
+        }
+
+        &:hover button[player-choose] {
+            padding: 0;
+        }
+
+        button[play] {
+            appearance: none;
+            border: none;
+            background: royalblue;
+            color: white;
+            font-weight: bold;
+            height: 34px;
+            cursor: pointer;
+            text-shadow: 0 0 2px black;
+
+            &:hover:not(:active) {
+                background: blue;
+            }
+        }
+
+        img {
+            display: block;
+        }
+    }
+</style>
