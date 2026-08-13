@@ -1,9 +1,21 @@
 
 import { $reactive } from 'https://jgermade.github.io/jq79/jq79.js';
 import { opfsService } from './opfs.service.js';
+import sdk from '@wasm-gaming/rsdkv4-wasm';   // ya mapeado en el importmap de craft/index.html
+
+// const instance = await sdk.load({
+//   attachTo: mountEl,                      // el SDK crea el <canvas id="canvas"> y lo escala solo
+//   storageNamespace: `rsdkv4/${gameId}`,   // mismo layout OPFS que opfs.service.js (LIBRARY_DIR)
+//   dataProvider: () => opfsService.readFileFromOPFS(`${gameId}/Data.rsdk`).then(f => f.arrayBuffer()),
+//   options: { skipStartMenu: true },
+//   onEvent: (e) => { if (e.type === 'error') console.error(e.error) },
+// })
+// instance.game.start(slot, player)  // slot 0-3, o null = NO SAVE
+
 
 export const gameService = $reactive({
   selectedGame: null,
+  isRunning: false,
 
   games: {
     'Sonic1': {
@@ -109,7 +121,36 @@ export const gameService = $reactive({
     } catch (error) {
       console.error(`Failed to add Data.rsdk for ${this.games[gameId].name}:`, error);
     }
-  }
+  },
+
+  async launchGame (el, {
+    gameId = this.selectedGame?.id,
+    slot = null,
+    player = 0,
+  } = {}) {
+    if (!gameId) throw new Error('launchGame: no game selected')
+
+    console.log('launchGame', {
+      gameId,
+      slot,
+      player,
+    })
+    
+    this.instance = {
+      running: await sdk.load({
+        ...el?.nodeName === 'CANVAS'
+          ? { canvasEl: el }
+          : { attachTo: el },
+        storageNamespace: `rsdkv4/${gameId}`,   // mismo layout OPFS que opfs.service.js (LIBRARY_DIR)
+        dataProvider: () => opfsService.readFileFromOPFS(`${gameId}/Data.rsdk`).then(f => f.arrayBuffer()),
+        options: { skipStartMenu: true },
+        onEvent: (e) => { if (e.type === 'error') console.error(e.error) },
+      }),
+    }
+
+    this.instance.running.game.start(slot, player)
+    this.isRunning = true;
+  },
 })
 
 gameService
@@ -123,6 +164,6 @@ gameService
 
 const previousSelectedGame = sessionStorage.getItem('selectedGame')
 
-if (previousSelectedGame?.loaded) {
+if (previousSelectedGame) {
   gameService.selectGame(previousSelectedGame)
 }
