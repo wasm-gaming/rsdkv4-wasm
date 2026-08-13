@@ -82,32 +82,38 @@ const instance = await new Rsdkv4SDK(setup).mount(el).start()
 
 ## 2. Assets y almacenamiento
 
-### 2.1 Primera vez: preguntar, pedir, escribir
+### 2.1 Primera vez: el host consigue el fichero y lo guarda **en su biblioteca**
 
-El SDK dice qué le falta; el host consigue el fichero y lo escribe en el destino que el SDK le
-da. Ninguno inventa rutas.
+**El SDK nunca escribe assets.** La biblioteca es del host: él decide dónde vive, con qué
+nombre y cuándo se borra. El SDK sólo recibe la puerta.
 
 ```js
-const sdk = new Rsdkv4SDK().storage({ namespace: 'rsdkv4/Sonic1' })
+// 1. pedírselo al jugador, con lo que el manifest declara
+const { accept, description } = Rsdkv4SDK.manifest.assets.find((a) => a.key === 'data')
+const [picked] = await showOpenFilePicker({
+  types: [{ description, accept: { 'application/octet-stream': accept } }],
+})
 
-for (const missing of await sdk.missingStorage()) {
-  // { key: 'data', accept: ['.rsdk'], description: 'RSDKv4 game data pack…' }
-  const [handle] = await showOpenFilePicker({
-    types: [{ description: missing.description, accept: { 'application/octet-stream': missing.accept } }],
-  })
-  const file = await handle.getFile()
-  const target = await sdk.assetTarget(missing.key)
-  await file.stream().pipeTo(await target.createWritable())   // disco a disco, sin heap
-}
+// 2. guardarlo donde el host quiera — aquí, su propio OPFS
+const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('mi-biblioteca', { create: true })
+const stored = await dir.getFileHandle('Sonic1.rsdk', { create: true })
+await (await picked.getFile()).stream().pipeTo(await stored.createWritable())
 
-await sdk.mount(el).start()
+// 3. prestárselo al SDK
+await new Rsdkv4SDK().assets({ data: stored }).mount(el).start()
 ```
+
+Un handle de OPFS se lee **a demanda** (8 KB cada vez, sin que el pack entre en memoria); uno
+de disco, vía `showOpenFilePicker()`, no tiene acceso síncrono y obliga a copiar.
 
 ### 2.2 Siguientes veces
 
+El host consulta su propia biblioteca — el SDK no la conoce.
+
 ```js
-const sdk = new Rsdkv4SDK().storage({ namespace: 'rsdkv4/Sonic1' })
-;(await sdk.missingStorage()).length === 0   // true → a jugar
+const stored = await dir.getFileHandle('Sonic1.rsdk').catch(() => null)
+if (!stored) return pedirPack()
+await new Rsdkv4SDK().assets({ data: stored }).mount(el).start()
 ```
 
 ### 2.3 Sin persistencia: bytes para esta ejecución
@@ -139,18 +145,20 @@ sdk.assets({
 sdk.assets({ data: miHandleDeOPFS })   // el SDK lee, no es dueño de nada
 ```
 
-### 2.6 Qué le falta al host, y qué al jugador
+### 2.6 Qué falta por entregar
 
 ```js
-sdk.missingAssets()          // síncrono, mira la cadena → bug del programador
-await sdk.missingStorage()   // asíncrono, mira el disco → falta pedírselo al jugador
+sdk.missingAssets()   // ['data'] — síncrono: mira la cadena, no el disco
 ```
+
+Sólo valida lo que se le ha pasado a `.assets()`. Si el fichero está o no en la biblioteca es
+pregunta del host, que es su dueño.
 
 ### 2.7 Borrar lo que el SDK escribió
 
 ```js
 await instance.purgeStorage()   // { settings: true, saves: true }
-// nunca toca los assets: no son suyos
+// nunca toca los assets: no son suyos, y ni siquiera sabe dónde están
 ```
 
 ---
@@ -167,14 +175,15 @@ await sdk.start()                         // valores por defecto
 
 ### 3.2 Qué acepta el payload, en este pack
 
-`manifest` no puede saber los personajes: salen del `Data.rsdk` cargado.
+Sale de `options()`: los personajes los declara el `Data.rsdk` cargado, no el manifest.
 
 ```js
-const schema = await instance.startSchema()
-// { type: 'object', properties: {
-//     slot:   { type: ['integer','null'], minimum: 0, maximum: 3 },
-//     player: { type: 'integer', enum: [0,1,2,3],
-//               enumNames: ['SONIC','TAILS','KNUCKLES','SONIC & TAILS'] } } }
+const { player } = await instance.options()
+// { value: 0, type: 'integer', enum: [0, 1, 2, 3], readOnly: true, source: 'game',
+//   title: 'Character', enumNames: ['SONIC', 'TAILS', 'KNUCKLES', 'SONIC & TAILS'] }
+
+// readOnly: no se cambia en caliente, se cambia abriendo otra sesión
+await instance.restart({ slot: 0, player: 2 })
 ```
 
 ### 3.3 Reiniciar con otros parámetros
@@ -227,39 +236,127 @@ sdk.config({
 })
 ```
 
-### 4.2 Leer las opciones vivas
+### 4.2 Leer: `manifest.options` resuelto en runtime
+
+Cada propiedad es su JSON Schema más el valor actual. Vocabulario estándar (`title`, `enum`,
+`minimum`, `readOnly`), así que un generador de formularios cualquiera puede pintarlo.
 
 ```js
-const rows = await instance.options()
-// [{ key: 'bgmVolume', label: 'Music volume', value: 0.8, type: 'number',  source: 'engine' },
-//  { key: 'spindash',  label: 'Spindash',     value: 0,   type: 'boolean', source: 'game' },
-//  { key: 'shieldType', label: 'Item type', value: 1, type: 'enum', source: 'game',
-//    values: ['S1', 'S2', 'S1+S3', 'S2+S3'] }]
+await instance.options()
 
-const porGrupo = Object.groupBy(rows, (r) => r.source)   // Motor / Juego
+{
+  // ─── sesión: se cambian abriendo otra con restart() ───────────────────
+  player: {
+    value: 0,
+    type: 'integer',
+    enum: [0, 1, 2, 3],
+    enumNames: ['SONIC', 'TAILS', 'KNUCKLES', 'SONIC & TAILS'],
+    title: 'Character',
+    readOnly: true,
+    source: 'game',
+  },
+  stage: {
+    value: 12,
+    type: 'integer',
+    enum: [0, 1, 2, /* … */],
+    enumNames: ['Presentation / TITLE SCREEN', /* … */, 'Regular / GREEN HILL ZONE 1'],
+    title: 'Level',
+    source: 'game',
+  },
+
+  // ─── del pack: vivas, y distintas en Sonic 1 y Sonic 2 ────────────────
+  spindash:      { value: 0, type: 'boolean', title: 'Spindash',         source: 'game' },
+  speedCap:      { value: 0, type: 'boolean', title: 'Ground speed cap', source: 'game' },
+  airSpeedCap:   { value: 0, type: 'boolean', title: 'Air speed cap',    source: 'game' },
+  spikeBehavior: { value: 0, type: 'boolean', title: 'S1 spikes',        source: 'game' },
+  superStates:   { value: 0, type: 'boolean', title: 'Super forms',      source: 'game' },
+  shieldType: {
+    value: 1,
+    type: 'integer',
+    enum: [0, 1, 2, 3],
+    enumNames: ['S1', 'S2', 'S1+S3', 'S2+S3'],
+    title: 'Item type',
+    source: 'game',
+  },
+
+  // ─── del motor: vivas ─────────────────────────────────────────────────
+  bgmVolume: {
+    value: 0.8,
+    type: 'number',
+    minimum: 0,
+    maximum: 1,
+    title: 'Music volume',
+    source: 'engine',
+  },
+  sfxVolume: {
+    value: 1,
+    type: 'number',
+    minimum: 0,
+    maximum: 1,
+    title: 'SFX volume',
+    source: 'engine',
+  },
+  screenWidth: {
+    value: 424,
+    type: 'integer',
+    enum: [320, 424],
+    enumNames: ['4:3 clásico', 'Panorámico'],
+    title: 'Screen width',
+    source: 'engine',
+  },
+  language: {
+    value: 4,
+    type: 'integer',
+    enum: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    enumNames: ['EN', 'FR', 'IT', 'DE', 'ES', 'JP', 'PT', 'RU', 'KO', 'ZH', 'ZS'],
+    title: 'Language',
+    source: 'engine',
+  },
+  devMenu:          { value: false, type: 'boolean', title: 'Dev menu',      source: 'engine' },
+  useHQModes:       { value: true,  type: 'boolean', title: 'HQ modes',      source: 'engine' },
+  fastForwardSpeed: { value: 8,   type: 'integer', minimum: 1, title: 'Fast forward',  source: 'engine' },
+  dimLimit:         { value: 300, type: 'integer', minimum: 0, title: 'Dim after (s)', source: 'engine' },
+
+  // ─── del motor: sólo al arrancar ──────────────────────────────────────
+  vsync:           { value: true, type: 'boolean', readOnly: true, title: 'VSync', source: 'engine' },
+  engineDebugMode: { value: true, type: 'boolean', readOnly: true, source: 'engine' },
+  startMenu: {
+    value: 'host',
+    type: 'string',
+    enum: ['native', 'host'],
+    readOnly: true,
+    source: 'engine',
+  },
+}
 ```
 
-### 4.3 Escribirlas
+`readOnly` marca lo que hay que reiniciar para cambiar, así que una pantalla de ajustes puede
+pintarlo en gris con un "requiere reiniciar" en vez de dejarlo fuera.
+
+### 4.3 Escribir: valores planos
 
 ```js
-await instance.options({ spindash: 1, bgmVolume: 0.5 })
-await instance.options({ vsync: false })   // ✗ lanza: vsync no es viva, sólo de arranque
+await instance.options({ spindash: 1, bgmVolume: 0.5 })   // sólo lo que cambia
+await instance.options({ vsync: false })                  // ✗ lanza: readOnly
 ```
+
+Sin argumentos es lectura; con objeto, escritura. El setter **no** acepta la forma del getter
+(`{ bgmVolume: { value: 0.8 } }`): sería ambiguo el día que una propiedad sea de tipo objeto.
 
 ### 4.4 El escenario es una opción más
 
 ```js
-const stage = (await instance.options()).find((r) => r.key === 'stage')
-// { key: 'stage', label: 'Level', value: 12, type: 'enum', source: 'game',
-//   values: ['Presentation / TITLE SCREEN', …, 'Regular / GREEN HILL ZONE 1', …] }
-
 await instance.options({ stage: 14 })   // esto es el warp
 ```
 
-### 4.5 Sólo los valores
+### 4.5 Agrupar y extraer
 
 ```js
-const values = Object.fromEntries((await instance.options()).map((r) => [r.key, r.value]))
+const opts = await instance.options()
+
+const values = Object.fromEntries(Object.entries(opts).map(([k, o]) => [k, o.value]))
+const { engine, game } = Object.groupBy(Object.entries(opts), ([, o]) => o.source)
+const editables = Object.entries(opts).filter(([, o]) => !o.readOnly)
 ```
 
 ---
@@ -373,7 +470,6 @@ try {
   await sdk.start({ slot: 0 })
 } catch (e) {
   switch (e.code) {
-    case 'storage-required':    return pedirNamespace()
     case 'storage-unavailable': return avisar('Tu navegador no permite guardar partidas')
     case 'not-isolated':        return avisar('La página necesita COOP/COEP')
     case 'storage-locked':      return avisar('Cierra la otra pestaña con el juego abierto')
@@ -445,25 +541,31 @@ const JUEGOS = { Sonic1: 'Sonic the Hedgehog', Sonic2: 'Sonic the Hedgehog 2' }
 let sdk = null
 let instance = null
 
+// biblioteca del host: suya, con su layout
+const biblioteca = await (await navigator.storage.getDirectory())
+  .getDirectoryHandle('mi-biblioteca', { create: true })
+
 async function elegirJuego(id) {
+  const pack = await biblioteca.getFileHandle(`${id}.rsdk`).catch(() => null)
+  if (!pack) return pedirPack(id)
+
   sdk = new Rsdkv4SDK()
-    .storage({ namespace: `rsdkv4/${id}` })
+    .assets({ data: pack })                       // prestado, no cedido
+    .storage({ namespace: `saves/${id}` })        // esto sí es del SDK
     .on('error', ({ error }) => mostrarError(error))
     .on('exit', () => volverALaBiblioteca())
 
-  const faltan = await sdk.missingStorage()
-  if (faltan.length) return pedirPack(faltan[0])
-
-  return pintarTarjetas(await sdk.saves())     // sin arrancar el motor
+  return pintarTarjetas(await sdk.saves())        // sin arrancar el motor
 }
 
-async function pedirPack({ key, accept, description }) {
-  const [h] = await showOpenFilePicker({
+async function pedirPack(id) {
+  const { accept, description } = Rsdkv4SDK.manifest.assets.find((a) => a.key === 'data')
+  const [picked] = await showOpenFilePicker({
     types: [{ description, accept: { 'application/octet-stream': accept } }],
   })
-  const file = await h.getFile()
-  await file.stream().pipeTo(await (await sdk.assetTarget(key)).createWritable())
-  return elegirJuego(juegoActual)
+  const stored = await biblioteca.getFileHandle(`${id}.rsdk`, { create: true })
+  await (await picked.getFile()).stream().pipeTo(await stored.createWritable())
+  return elegirJuego(id)
 }
 
 async function jugar(slot, player) {
@@ -498,10 +600,10 @@ window.addEventListener('keydown', async (e) => {
 ### 9.3 Selector de personaje desde el motor
 
 ```js
-const schema = await instance.startSchema()
-const nombres = schema.properties.player.enumNames    // del pack, no cableados
+const { player } = await instance.options()
+// player.enumNames sale del GameConfig del pack, no está cableado en el host
 
-pintarBotones(nombres, (i) => instance.restart({ slot: ranuraElegida, player: i }))
+pintarBotones(player.enumNames, (i) => instance.restart({ slot: ranuraElegida, player: i }))
 ```
 
 ### 9.4 Varias instancias
@@ -549,7 +651,7 @@ const _contract: EngineSDKClass = Rsdkv4SDK
 | `config.onEvent` | `.on(tipo, fn)` |
 | `instance.start()` | — (era un no-op; arrancar es de la fábrica) |
 | `instance.game.start(slot, player)` | `sdk.start({ slot, player })` · `instance.restart({ … })` |
-| `instance.game.players()` | `instance.startSchema()` |
+| `instance.game.players()` | `(await instance.options()).player.enumNames` |
 | `instance.game.saveSlots()` | `instance.saves()` · `sdk.saves()` |
 | `instance.game.deleteSave(n)` | `instance.deleteSave(n)` |
 | `instance.game.options()` · `setOption()` | `instance.options()` · `options({ … })` |
