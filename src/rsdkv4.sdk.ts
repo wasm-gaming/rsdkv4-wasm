@@ -1,3 +1,26 @@
+/**
+ * The engine package's entry point: an `EngineSDK` for RSDKv4.
+ *
+ * ```ts
+ * import sdk, { manifest, load } from '@wasm-gaming/rsdkv4-wasm';
+ * ```
+ *
+ * Everything a host drives is the contract's, and documented there — Layer A is
+ * {@link manifest} (an
+ * [EngineManifest](https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EngineManifest.html)),
+ * Layer B is {@link load} returning an {@link EngineInstance}. Two things are this
+ * engine's own and only exist here:
+ *
+ * - the extra fields of {@link Rsdkv4LoadConfig}, on top of {@link EngineConfig}
+ * - the values of `config.options`, in {@link Rsdkv4Options}
+ *
+ * The instance adds RSDKv4's own surface ({@link RsdkGameBridge},
+ * {@link RsdkDevMenuBridge}) for hosts that render the start screens themselves.
+ *
+ * @module
+ * @see [The engine contract](https://wasm-gaming.github.io/engine-specs/api-docs/)
+ */
+
 // @wasm-gaming/rsdkv4-wasm — SDK entry point.
 //
 // Conforms to the wasm-gaming engine contract (github.com/wasm-gaming/engine-specs):
@@ -20,6 +43,14 @@ import type { EngineConfig, EngineInstance, EngineEvent, AssetData, InputPreset,
 import { manifest } from './rsdkv4.manifest.js';
 import { DEFAULT_RSDKV4_OPTIONS, type Rsdkv4Options } from './rsdkv4.options.js';
 
+/**
+ * Layer A: what this engine ships and needs, as data, before anything boots.
+ *
+ * Also serialized to `dist/manifest.json` (the `./manifest` export) for hosts
+ * that read it without importing the SDK. `manifest.options` is the JSON Schema
+ * of {@link Rsdkv4Options}; `manifest.assets` declares `data` (required) and
+ * `settings` (optional), the two keys {@link Rsdkv4LoadConfig} accepts.
+ */
 export { manifest };
 
 const WORK_ROOT = '/data';
@@ -328,6 +359,23 @@ export interface RsdkGameBridge {
   setOption(key: string, value: number): void;
 }
 
+/**
+ * What {@link load} returns: the contract's {@link EngineInstance}, with owner-aware
+ * `pause`/`resume` and this engine's own bridges.
+ *
+ * Three contract methods behave in ways worth knowing before wiring a host:
+ *
+ * - **`start()` is a no-op.** {@link load} already left the engine running, and the
+ *   contract allows that. What starts a *game* is {@link RsdkGameBridge.start}, and
+ *   it takes the slot and character this one ignores.
+ * - **`reset()` throws.** RSDKv4 cannot power-cycle in process: `destroy()` and
+ *   {@link load} again.
+ * - **`setInput()`** swaps the gamepad→keyboard map used by the host-side input
+ *   layer; passing nothing restores `manifest.input`.
+ *
+ * The capability-gated `saveState`/`loadState`/`screenshot` are absent, as
+ * `manifest.capabilities` says.
+ */
 export type Rsdkv4Instance = Omit<EngineInstance, 'pause' | 'resume'> & {
   /**
    * Pause, on behalf of `owner` (default 'host'). The first caller to pause owns
@@ -343,28 +391,91 @@ export type Rsdkv4Instance = Omit<EngineInstance, 'pause' | 'resume'> & {
   persistent: boolean;
   /** Relative storage namespace used under /data (e.g. "sonic1", "sonic2"). */
   storageNamespace: string;
-  /** Remove persisted game files for this namespace only. */
+  /**
+   * Remove persisted game files for this namespace only — the pack and the
+   * settings, never anything outside `storageNamespace`.
+   *
+   * @deprecated Gone from the contract as of `engine-specs` 0.3.0: the namespace
+   * is the host's choice, so the host can find and clear the folder without the
+   * SDK's help. It still works here, and will keep working while this package
+   * targets `0.2.x`; do not write new hosts against it.
+   */
   purgeStorage(): { data: boolean; settings: boolean };
 };
 
 /**
- * Extra (engine-specific) config on top of the contract's EngineConfig: lazy asset
- * providers, invoked only on a cache miss — e.g. to skip a large Data.rsdk fetch
- * when it's already persisted in OPFS.
+ * What {@link load} accepts: the contract's {@link EngineConfig}, plus the fields
+ * below, which exist only in this engine.
+ *
+ * How this engine reads the contract's own fields:
+ *
+ * | field | here |
+ * | --- | --- |
+ * | `assets.data` | the `Data.rsdk` pack. Required — but see the precedence under `dataProvider` below |
+ * | `assets.settings` | a ready-made `settings.ini`. Omit it and one is generated from `options` |
+ * | `options` | {@link Rsdkv4Options}. The contract types it as an opaque bag; this engine reads those keys |
+ * | `persist` | `'opfs'` forces a persistent working dir (warns and falls back if unavailable), `null` keeps nothing — including save data —, unset picks OPFS when the page is cross-origin isolated |
+ * | `canvasEl` / `attachTo` | at least one is required. With only `attachTo`, the SDK creates the canvas inside it; either way the element ends up with `id="canvas"`, which is how Emscripten's SDL2 port finds it |
+ * | `onEvent` | `ready`, `error`, `frame`. A throwing handler is swallowed |
  */
 export type Rsdkv4LoadConfig = EngineConfig & {
+  /**
+   * Lazy source for the `Data.rsdk` pack, invoked only on a cache miss.
+   *
+   * Precedence: `assets.data` wins; otherwise a copy already persisted in this
+   * namespace is reused; only if there is neither is this called — which is the
+   * point, since it saves fetching tens of megabytes on every load. With none of
+   * the three, {@link load} throws.
+   */
   dataProvider?: () => Promise<AssetData> | AssetData;
+  /**
+   * Lazy source for `settings.ini`, invoked only on a cache miss.
+   *
+   * Precedence: `assets.settings` > a persisted copy > this > generated from
+   * `options`. Note where that leaves `options`: last, and skipped entirely if a
+   * `settings.ini` from an earlier session is still in this namespace.
+   */
   settingsProvider?: () => Promise<AssetData> | AssetData;
   /**
    * Per-game storage folder under /data used for OPFS/WASMFS files.
    * Examples: "sonic1", "sonic2", "my-pack/v1".
+   *
+   * It segregates the pack, the settings and the save file, so two games do not
+   * overwrite each other. Non-string or empty values normalize to `"default"` —
+   * including the object you get from interpolating a game record by mistake.
    */
   storageNamespace?: string;
-  /** Deprecated alias for `canvasEl`, kept for hosts written against 0.0.x. */
+  /**
+   * Alias for `canvasEl`, kept for hosts written against 0.0.x.
+   *
+   * @deprecated Use the contract's `canvasEl`.
+   */
   canvas?: HTMLCanvasElement;
 };
 
-/** Boot the RSDKv4 engine. */
+/**
+ * Layer B: boot the engine and return the running instance.
+ *
+ * Mounts the working dir, resolves the pack and the settings (see the precedence
+ * rules on {@link Rsdkv4LoadConfig}), starts the engine, and resolves once it is
+ * live — so `instance.game` and `instance.devMenu` answer immediately. The engine
+ * is already running when this resolves; `instance.start()` is a no-op.
+ *
+ * ```ts
+ * const instance = await load({
+ *   attachTo: document.querySelector('#stage'),
+ *   assets: { data },                    // the Data.rsdk pack
+ *   options: { skipStartMenu: true },    // Rsdkv4Options
+ *   storageNamespace: 'sonic2',
+ *   onEvent: (e) => console.log(e.type),
+ * });
+ * ```
+ *
+ * @param config The contract's `EngineConfig` plus this engine's extras.
+ * @returns The engine instance, already running.
+ * @throws If neither `canvasEl` nor `attachTo` is given, or if no `Data.rsdk`
+ * can be found in `assets.data`, in persistent storage, or from `dataProvider`.
+ */
 export async function load(config: Rsdkv4LoadConfig): Promise<Rsdkv4Instance> {
   const { assets, onEvent, attachTo } = config;
   const options = config.options as Rsdkv4Options | undefined;
@@ -725,4 +836,9 @@ export async function load(config: Rsdkv4LoadConfig): Promise<Rsdkv4Instance> {
   };
 }
 
+/**
+ * The `EngineSDK` shape the contract asks every engine package to default-export:
+ * `{ manifest, load }`, so a host can drive this engine without knowing it is this
+ * engine.
+ */
 export default { manifest, load };

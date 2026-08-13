@@ -1,0 +1,33 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src/rsdkv4.sdk.ts", "src/rsdkv4.options.ts", "src/rsdkv4.manifest.ts"],
+  "out": "dist/api-docs",
+  "name": "@wasm-gaming/rsdkv4-wasm",
+  "includeVersion": true,
+  "readme": "docs/SITE-HOME.md",
+  "githubPages": true,
+  "hideGenerator": true,
+  "navigationLinks": {
+    "Demo": "../",
+    "Contract": "https://wasm-gaming.github.io/engine-specs/api-docs/",
+    "GitHub": "https://github.com/wasm-gaming/rsdkv4-wasm"
+  },
+  "externalSymbolLinkMappings": {
+    "@wasm-gaming/engine-specs": {
+      "EngineManifest": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EngineManifest.html",
+      "EngineSDK": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EngineSDK.html",
+      "EngineInstance": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EngineInstance.html",
+      "EngineCapabilities": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EngineCapabilities.html",
+      "AssetSpec": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/AssetSpec.html",
+      "VideoSpec": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/VideoSpec.html",
+      "EngineArtifacts": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EngineArtifacts.html",
+      "EngineConfig": "https://wasm-gaming.github.io/engine-specs/api-docs/types/EngineConfig.html",
+      "EngineEvent": "https://wasm-gaming.github.io/engine-specs/api-docs/types/EngineEvent.html",
+      "AssetData": "https://wasm-gaming.github.io/engine-specs/api-docs/types/AssetData.html",
+      "InputPreset": "https://wasm-gaming.github.io/engine-specs/api-docs/types/InputPreset.html",
+      "KeyMap": "https://wasm-gaming.github.io/engine-specs/api-docs/types/KeyMap.html",
+      "JSONSchema": "https://wasm-gaming.github.io/engine-specs/api-docs/types/JSONSchema.html",
+      "PersistMode": "https://wasm-gaming.github.io/engine-specs/api-docs/types/PersistMode.html"
+    }
+  }
+}

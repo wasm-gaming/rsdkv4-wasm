@@ -21,7 +21,7 @@ PORT ?= 8024
 SPECS_DEMO := node_modules/@wasm-gaming/engine-specs/demo
 
 .PHONY: build build-sdk build-lib build-manifest build-demo build-vanilla build-craft build-wasm \
-	preview preview.single typecheck test release-check i install \
+	build-docs preview preview.single typecheck test release-check i install \
 	clean clean-all help
 
 i: install
@@ -35,7 +35,7 @@ node_modules: package.json
 
 build: build-sdk build-wasm ## Full build → dist/ (TypeScript + WASM)
 
-build-sdk: build-lib build-manifest build-demo build-vanilla ## TypeScript → dist/ (no WASM)
+build-sdk: build-lib build-manifest build-demo build-vanilla build-docs ## TypeScript → dist/ (no WASM)
 
 build-lib: node_modules ## Compile SDK/options/manifest → dist/rsdkv4/
 	$(BIN)/tsc -p tsconfig.json
@@ -78,6 +78,12 @@ build-craft: ## Copy the no-build demo → dist/craft/ (served at /craft/)
 	# import map, so a copy is the whole "build". Edit src/craft and reload.
 	rm -rf dist/craft
 	cp -R src/craft dist/craft
+
+build-docs: node_modules ## API reference → dist/api-docs/ (config in typedoc.json)
+	# Lands inside dist/ on purpose: CI uploads dist/ as the build artifact and the
+	# release deploys it to Pages, so the reference publishes itself with no
+	# workflow changes — and `make preview` already serves it, at /api-docs/.
+	$(BIN)/typedoc
 
 build-wasm: ## WASM via emscripten/emsdk (Docker) → dist/rsdkv4/rsdkv4.{js,wasm}
 	bash scripts/build-docker.sh

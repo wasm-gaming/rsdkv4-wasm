@@ -44,6 +44,7 @@
   },
   "devDependencies": {
     "@wasm-gaming/engine-specs": "^0.2.6",
+    "typedoc": "^0.28.20",
     "typescript": "^5.5.0"
   },
   "engineContract": "https://github.com/wasm-gaming/engine-specs",
