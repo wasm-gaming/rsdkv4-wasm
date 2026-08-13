@@ -236,6 +236,34 @@ sdk.config({
 })
 ```
 
+### 4.1.1 Leer lo que se usará al arrancar
+
+`config()` sin argumentos es el getter, y es **síncrono**: no hay motor al que preguntar, sólo
+`manifest.config` con lo que la cadena haya puesto encima.
+
+```js
+const sdk = new Rsdkv4SDK().config({ language: 4, bgmVolume: 0.8 })
+
+sdk.config()
+{
+  language: {
+    value: 4,            // lo que se usará
+    default: 0,          // lo que dice el manifest
+    type: 'integer',
+    enum: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    enumNames: ['EN', 'FR', 'IT', 'DE', 'ES', 'JP', 'PT', 'RU', 'KO', 'ZH', 'ZS'],
+    title: 'Language',
+  },
+  bgmVolume: { value: 0.8, default: 1, type: 'number', minimum: 0, maximum: 1, title: 'Music volume' },
+  vsync:     { value: true, default: true, type: 'boolean', title: 'VSync' },
+  startMenu: { value: 'native', default: 'native', type: 'string', enum: ['native', 'host'] },
+  // …
+}
+```
+
+Sirve para pintar una pantalla de preferencias **sin arrancar nada**. Con una instancia viva,
+`config({...})` lanza; `config()` siempre se puede leer.
+
 ### 4.2 Leer: `manifest.options` resuelto en runtime
 
 Cada propiedad es su JSON Schema más el valor actual. Vocabulario estándar (`title`, `enum`,
@@ -332,6 +360,17 @@ await instance.options()
 
 `readOnly` marca lo que hay que reiniciar para cambiar, así que una pantalla de ajustes puede
 pintarlo en gris con un "requiere reiniciar" en vez de dejarlo fuera.
+
+Una clave del motor sale en los dos sitios, y las dos lecturas son correctas: **`sdk.config()`
+dice con qué arrancó, `instance.options()` dice cómo está ahora.** Si el jugador bajó la música
+en marcha, discrepan.
+
+|  | `sdk.config()` | `instance.options()` |
+| --- | --- | --- |
+| coste | síncrono: manifest + cadena | asíncrono: cruza al worker |
+| claves | sólo las del motor | las del motor **+** las del pack |
+| `value` | lo que se usará al arrancar | lo que está en efecto ahora |
+| `source` | no hace falta, todo es `engine` | `'engine'` \| `'game'` |
 
 ### 4.3 Escribir: valores planos
 
