@@ -364,6 +364,60 @@ data ships with it, so the live demo opens on two empty slots — drop each game
   GitHub Pages can't set COOP/COEP headers, and this build couldn't mount OPFS
   even isolated (see the filesystem caveat above).
 
+## Project Specs
+
+What this project is, and the constraints that shape it.
+
+- **A contract implementation, not a game.** The deliverable is one game-agnostic
+  `rsdkv4.wasm` plus an SDK conforming to
+  [@wasm-gaming/engine-specs](https://github.com/wasm-gaming/engine-specs) — `manifest`
+  (Layer A) and `load()` (Layer B). A host drives this engine exactly as it drives the
+  other eleven.
+- **Ships none of the game.** The player provides `Data.rsdk`; it never leaves the
+  browser and is never committed. Which pack the host hands over is what selects Sonic 1
+  or Sonic 2.
+- **The engine's own values are the SDK's only private vocabulary.** They live in
+  [src/rsdkv4.options.ts](src/rsdkv4.options.ts) — seven keys, mirrored as JSON Schema in
+  `manifest.options` — and in the extra fields of `Rsdkv4LoadConfig`. Everything else is
+  contract, documented once at the [contract
+  reference](https://wasm-gaming.github.io/engine-specs/api-docs/).
+- **The host owns the files; the SDK owns its folder.** The SDK reads the pack and never
+  writes it. What it does write — save data, `settings.ini` — lives under the host-chosen
+  `storageNamespace`.
+- **Persistence needs cross-origin isolation.** OPFS sync access exists only in workers,
+  so the working dir falls back to in-memory WASMFS when the page isn't isolated (or when
+  the build can't create the backend from the main thread — see the filesystem caveat).
+- **Everything builds from the Makefile**, `package.json` has no scripts. `dist/` is both
+  the npm artifact and the Pages site: demo at the root, `/craft`, `/vanilla`, and the API
+  reference at `/api-docs`.
+- **Sessions are the record.** Specs and decisions live in [SESSIONS/](SESSIONS/), append-only.
+- **Where it is going:** contract 1.0 replaces `{ manifest, load }` with `EngineSDK` /
+  `EnginePlay` classes. The six `docs/{SDK,PLAY}-*.md` documents describe that API for this
+  engine, and the migration plan is
+  [SESSIONS/2026-08-14_12h35.sdk-migration-to-contract-1.0.session.md](SESSIONS/2026-08-14_12h35.sdk-migration-to-contract-1.0.session.md).
+
+## Todos
+
+Contract 1.0 migration — blocked on `engine-specs` unless noted:
+
+- [ ] **Worker smoke test** (not blocked, do first): `-pthread` + `-sPROXY_TO_PTHREAD` +
+      `OffscreenCanvas`, then measure audio (SDL's callback decodes Ogg straight from the
+      pack) and input latency. The async 1.0 API rests on this.
+- [ ] Split `Rsdkv4Options` into `Rsdkv4Config` (engine) and `Rsdkv4Options` (session).
+- [ ] Manifest to 1.0: `contractVersion`, `config`, no `mountPath`, `capabilities.saves`.
+- [ ] Parse `SData.bin` from JS, so `sdk.saves()` reads slots without booting the wasm.
+- [ ] `Rsdkv4Play` / `Rsdkv4SDK` classes; `create()` as the only engine-specific method.
+- [ ] Migrate the three hosts: `src/vanilla`, `src/craft`, `src/demo` (~65 call sites).
+
+Independent of the migration:
+
+- [ ] `export default { manifest, load } satisfies EngineSDK` — nothing declares conformance today.
+- [ ] Emit `{ type: 'exit' }` at the end of `destroy()`.
+- [ ] Don't emit `ready` when the engine never came up: today `waitForEngine()` times out
+      after 4 s, warns, and reports success anyway.
+- [ ] `assertManifest(manifest)` in [scripts/emit-manifest.mjs](scripts/emit-manifest.mjs).
+- [ ] End-to-end browser run from a real `Data.rsdk`.
+
 ## Status
 
 - ✅ **TS build** — compiles clean; manifest validates against the contract.
