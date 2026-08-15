@@ -21,8 +21,8 @@ PORT ?= 8024
 SPECS_DEMO := node_modules/@wasm-gaming/engine-specs/demo
 
 .PHONY: build build-sdk build-lib build-manifest build-demo build-vanilla build-craft build-wasm \
-	build-docs preview preview.single typecheck test release-check i install \
-	clean clean-all help
+	build-wasm-worker build-smoke build-docs preview preview.single typecheck test release-check \
+	i install clean clean-all help
 
 i: install
 install: ## Install dev dependencies (typescript)
@@ -87,6 +87,16 @@ build-docs: node_modules ## API reference → dist/api-docs/ (config in typedoc.
 
 build-wasm: ## WASM via emscripten/emsdk (Docker) → dist/rsdkv4/rsdkv4.{js,wasm}
 	bash scripts/build-docker.sh
+
+build-wasm-worker: ## Experimental pthread/OffscreenCanvas WASM → dist/rsdkv4-worker/
+	# Opt-in variant: main() on a pthread, picture on a transferred OffscreenCanvas.
+	# Lands beside the shipped build rather than replacing it, so worker-smoke can
+	# run the two against each other. See SESSIONS/ for what it is meant to answer.
+	RSDKV4_WORKER=1 bash scripts/build-docker.sh
+
+build-smoke: ## Copy the worker smoke test → dist/worker-smoke/ (served at /worker-smoke/)
+	rm -rf dist/worker-smoke
+	cp -R src/worker-smoke dist/worker-smoke
 
 typecheck: build-lib ## Type-check without emitting (works from a clean checkout)
 	$(BIN)/tsc -p tsconfig.json --noEmit

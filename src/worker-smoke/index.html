@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>RSDKv4 — worker smoke test</title>
+
+  <!-- Cross-origin isolation. The worker build is a pthread build: without COOP/COEP
+       there is no SharedArrayBuffer and the module cannot even start. `make preview`
+       sends the headers; this service worker covers a static host that cannot. -->
+  <script src="../coi.js"></script>
+
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; display: grid; grid-template-columns: 1fr 22rem; height: 100vh;
+      font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: #14161a; color: #e6e8ec;
+    }
+    #stage { display: grid; place-items: center; background: #000; min-width: 0; }
+    aside { overflow-y: auto; padding: 1rem; border-left: 1px solid #2a2f38; }
+    h1 { font-size: 13px; margin: 0 0 .75rem; letter-spacing: .08em; text-transform: uppercase; color: #9aa4b2; }
+    h2 { font-size: 12px; margin: 1.25rem 0 .35rem; color: #9aa4b2; text-transform: uppercase; letter-spacing: .06em; }
+    dl { display: grid; grid-template-columns: auto 1fr; gap: .1rem .6rem; margin: 0; }
+    dt { color: #9aa4b2; }
+    dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+    .ok { color: #7ee787; } .bad { color: #ff7b72; } .warn { color: #e3b341; } .idle { color: #6e7681; }
+    button, select { font: inherit; background: #22262e; color: inherit; border: 1px solid #3a4150;
+                     border-radius: 5px; padding: .3rem .6rem; cursor: pointer; }
+    button:disabled { opacity: .45; cursor: default; }
+    #log { margin-top: .5rem; white-space: pre-wrap; word-break: break-word; color: #b9c0cc; font-size: 12px; }
+    #meter { height: 6px; background: #22262e; border-radius: 3px; overflow: hidden; margin-top: .35rem; }
+    #meterFill { height: 100%; width: 0; background: #7ee787; transition: width .1s linear; }
+  </style>
+</head>
+<body>
+  <div id="stage"></div>
+
+  <aside>
+    <h1>Worker smoke test</h1>
+
+    <p>
+      <select id="build">
+        <option value="worker">worker build (pthread + OffscreenCanvas)</option>
+        <option value="baseline">baseline build (single-threaded)</option>
+      </select>
+    </p>
+    <p>
+      <select id="game"></select>
+      <button id="boot">Boot</button>
+    </p>
+    <p><input type="file" accept=".rsdk" id="install" /></p>
+
+    <h2>Environment</h2>
+    <dl id="env"></dl>
+
+    <h2>Engine</h2>
+    <dl id="engine"></dl>
+
+    <h2>Audio</h2>
+    <dl id="audio"></dl>
+    <div id="meter"><div id="meterFill"></div></div>
+
+    <h2>Input</h2>
+    <dl id="input"></dl>
+
+    <div id="log"></div>
+  </aside>
+
+  <script type="module" src="./smoke.js"></script>
+</body>
+</html>
