@@ -76,7 +76,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           node scripts/sync-version.mjs "${{ needs.next.outputs.version }}"
-          git add package.json package-lock.json src/rsdkv4.manifest.ts
+          git add package.json package-lock.json src/rsdkv4.sdk.ts
           git commit -m "v${{ needs.next.outputs.version }}"
           git tag "v${{ needs.next.outputs.version }}"
       # Not a fast-forward if someone merged while the build ran, in which case
@@ -171,8 +171,10 @@ jobs:
             index.html \
             coi.js \
             rsdkv4/rsdkv4.sdk.js \
-            demo/demo.js \
-            manifest.json
+            rsdkv4/rsdkv4.wasm \
+            engine-specs.js \
+            demo.js \
+            craft/index.html
           do
             test -f "dist/$path" || { echo "missing: dist/$path"; exit 1; }
           done

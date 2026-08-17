@@ -16,7 +16,7 @@
 // The artwork is CSS (see theme.rsdkv4.css, `.rsdk-start-*`); the only image is
 // the optional game logo the host passes in.
 
-import type { Rsdkv4Instance, RsdkSaveSlot } from '@wasm-gaming/rsdkv4-wasm';
+import type { Rsdkv4Play, RsdkSaveSlot } from '@wasm-gaming/rsdkv4-wasm';
 
 /** Playing without a save slot — the engine's "no save" mode. */
 const NO_SAVE = null;
@@ -97,7 +97,7 @@ function emeraldRow(owned: number): HTMLElement {
 
 export function mountStartScreens(
   container: HTMLElement,
-  engine: Rsdkv4Instance,
+  engine: Rsdkv4Play,
   options: StartScreensOptions = {},
 ): () => void {
   const stageLists = engine.devMenu.getStageList();

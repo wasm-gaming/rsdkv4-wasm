@@ -13,8 +13,9 @@ on:
     inputs:
       version:
         description: >-
-          Version to stamp across package.json and the manifest before building.
-          Blank builds whatever the checkout says, which is what a PR wants.
+          Version to stamp across package.json, the lockfile and Rsdkv4SDK.version
+          before building. Blank builds whatever the checkout says, which is what
+          a PR wants.
         type: string
         default: ''
 
@@ -40,14 +41,15 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      # Stamp the release version into package.json + manifest before building,
-      # so the artifacts carry the version that is about to be tagged.
+      # Stamp the release version into package.json, package-lock.json and the
+      # `static readonly version` of Rsdkv4SDK — the three places sync-version
+      # writes — so the artifacts carry the version that is about to be tagged.
       - name: Stamp the release version
         if: inputs.version != ''
         run: node scripts/sync-version.mjs "${{ inputs.version }}"
       - name: Install dependencies
         run: npm ci
-      - name: Build SDK (TypeScript + manifest + demo shell)
+      - name: Build the package (TypeScript → dist/rsdkv4/)
         run: make build-sdk
       - name: Typecheck
         run: make typecheck
@@ -56,6 +58,17 @@ jobs:
       # so the bytes that get published are the bytes that were tested.
       - name: Pack
         run: npm pack
+
+      # …and only then the site: the API reference, the demo and the hosts, which
+      # is what the Pages job deploys. `build-sdk` stopped producing any of it
+      # when the package and the site were split apart.
+      #
+      # Last, and deliberately: `make demo` is also the only thing that
+      # type-checks the hosts, so a host that has drifted from the SDK fails
+      # here — after the tarball is packed, so it cannot hold up the package the
+      # way it used to.
+      - name: Build the site
+        run: make demo
 
       - uses: actions/upload-artifact@v4
         with:
