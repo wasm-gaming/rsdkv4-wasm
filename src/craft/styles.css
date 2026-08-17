@@ -44,7 +44,30 @@ html, body {
     padding: 0;
     height: 100%;
     background: radial-gradient(circle at 15% 50%, var(--demo-bg-radial-1), transparent 45%), radial-gradient(circle at 85% 30%, var(--demo-bg-radial-2), transparent 50%), var(--demo-bg-gradient);
-    background-attachment: fixed;
+    /* background-attachment: fixed; */
+    transition: background .2s ease-out;
+}
+
+body.is-launched {
+    background: black;
+}
+
+@keyframes fadeIn {
+    0% {
+        opacity: 0;
+    }
+    100% {
+        opacity: 1;
+    }
+}
+
+@keyframes fadeOut {
+    0% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0;
+    }
 }
 
 @keyframes fadeInUp {
@@ -55,6 +78,39 @@ html, body {
     100% {
         opacity: 1;
         transform: translateY(0);
+    }
+}
+
+@keyframes fadeInDown {
+    0% {
+        opacity: 0;
+        transform: translateY(-50px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fadeOutDown {
+    0% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(50px);
+    }
+}
+
+@keyframes fadeOutUp {
+    0% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(-50px);
     }
 }
 

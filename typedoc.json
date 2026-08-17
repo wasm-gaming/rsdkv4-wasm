@@ -1,33 +1,41 @@
 {
   "$schema": "https://typedoc.org/schema.json",
-  "entryPoints": ["src/rsdkv4.sdk.ts", "src/rsdkv4.options.ts", "src/rsdkv4.manifest.ts"],
-  "out": "dist/api-docs",
+  "entryPoints": ["src/rsdkv4.sdk.ts", "src/rsdkv4.options.ts"],
+  "out": "dist",
+  "cleanOutputDir": false,
   "name": "@wasm-gaming/rsdkv4-wasm",
   "includeVersion": true,
   "readme": "docs/SITE-HOME.md",
   "githubPages": true,
   "hideGenerator": true,
+  "customJs": "docs/typedoc-toolbar.js",
   "navigationLinks": {
-    "Demo": "../",
+    "Craft demo": "https://wasm-gaming.github.io/rsdkv4-wasm/craft/",
+    "Worker smoke": "https://wasm-gaming.github.io/rsdkv4-wasm/worker-smoke/",
     "Contract": "https://wasm-gaming.github.io/engine-specs/api-docs/",
     "GitHub": "https://github.com/wasm-gaming/rsdkv4-wasm"
   },
   "externalSymbolLinkMappings": {
     "@wasm-gaming/engine-specs": {
-      "EngineManifest": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EngineManifest.html",
       "EngineSDK": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EngineSDK.html",
-      "EngineInstance": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EngineInstance.html",
-      "EngineCapabilities": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EngineCapabilities.html",
-      "AssetSpec": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/AssetSpec.html",
-      "VideoSpec": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/VideoSpec.html",
-      "EngineArtifacts": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EngineArtifacts.html",
-      "EngineConfig": "https://wasm-gaming.github.io/engine-specs/api-docs/types/EngineConfig.html",
-      "EngineEvent": "https://wasm-gaming.github.io/engine-specs/api-docs/types/EngineEvent.html",
-      "AssetData": "https://wasm-gaming.github.io/engine-specs/api-docs/types/AssetData.html",
-      "InputPreset": "https://wasm-gaming.github.io/engine-specs/api-docs/types/InputPreset.html",
-      "KeyMap": "https://wasm-gaming.github.io/engine-specs/api-docs/types/KeyMap.html",
-      "JSONSchema": "https://wasm-gaming.github.io/engine-specs/api-docs/types/JSONSchema.html",
-      "PersistMode": "https://wasm-gaming.github.io/engine-specs/api-docs/types/PersistMode.html"
+      "EngineSDKBase": "https://wasm-gaming.github.io/engine-specs/api-docs/classes/EngineSDKBase.html",
+      "EngineSDKConstructor": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EngineSDKConstructor.html",
+      "EnginePlay": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EnginePlay.html",
+      "EnginePlayBase": "https://wasm-gaming.github.io/engine-specs/api-docs/classes/EnginePlayBase.html",
+      "PromisePlay": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/PromisePlay.html",
+      "EngineSurface": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EngineSurface.html",
+      "EngineInit": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EngineInit.html",
+      "EnginePayloads": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EnginePayloads.html",
+      "EngineSpec": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EngineSpec.html",
+      "EngineEvent": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/EngineEvent.html",
+      "EventEmitter": "https://wasm-gaming.github.io/engine-specs/api-docs/classes/EventEmitter.html",
+      "EventEmitter.off": "https://wasm-gaming.github.io/engine-specs/api-docs/classes/EventEmitter.html#off",
+      "CoreEvents": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/CoreEvents.html",
+      "EventsOf": "https://wasm-gaming.github.io/engine-specs/api-docs/types/EventsOf.html",
+      "PropertyDefinition": "https://wasm-gaming.github.io/engine-specs/api-docs/interfaces/PropertyDefinition.html",
+      "PropertiesDefinition": "https://wasm-gaming.github.io/engine-specs/api-docs/types/PropertiesDefinition.html",
+      "PropertiesSpec": "https://wasm-gaming.github.io/engine-specs/api-docs/types/PropertiesSpec.html",
+      "PayloadKind": "https://wasm-gaming.github.io/engine-specs/api-docs/types/PayloadKind.html"
     }
   }
 }

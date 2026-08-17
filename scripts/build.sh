@@ -324,6 +324,218 @@ fi
 echo "Patching Input.cpp to forcibly initialize controllers continuously with fallback mapping..."
 perl -0777 -pi -e 's/void ProcessInput\(\)\n\{/void ProcessInput()\n{\n#if RETRO_USING_SDL2\n    for (int i = 0; i < SDL_NumJoysticks(); ++i) {\n        if (!SDL_GameControllerFromInstanceID(i)) {\n            if (!SDL_IsGameController(i)) {\n                char mapping[1024];\n                SDL_JoystickGUID guid = SDL_JoystickGetDeviceGUID(i);\n                char guid_str[33];\n                SDL_JoystickGetGUIDString(guid, guid_str, sizeof(guid_str));\n                snprintf(mapping, sizeof(mapping), "%s,Web Gamepad,a:b0,b:b1,x:b2,y:b3,back:b8,start:b9,leftstick:b10,rightstick:b11,leftshoulder:b4,rightshoulder:b5,dpup:b12,dpdown:b13,dpleft:b14,dpright:b15,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:b6,righttrigger:b7,", guid_str);\n                SDL_GameControllerAddMapping(mapping);\n            }\n            controllerInit(i);\n        }\n    }\n#endif/g' "$WORK_DIR/RSDKv4/Input.cpp"
 
+echo "Adding WebInput.cpp (host-driven input, and the jump key that pauses)..."
+cat << 'EOF' > "$WORK_DIR/RSDKv4/WebInput.cpp"
+// The two things this build does to ProcessInput. They are independent — either
+// one works without the other — and they live together because both write
+// inputDevice and both are called from the patch in Input.cpp.
+//
+// 1. web_input_fold_jump(): the retail bytecode inside Data.rsdk pauses on
+//    button B as well as on start (only the script interpreter ever writes
+//    ENGINE_INITPAUSE — Script.cpp → RetroGameLoop.cpp), and B is also a jump
+//    button (Object.cpp: jumpPress = keyPress.C | keyPress.B | keyPress.A). So
+//    on a keyboard the jump key `x` jumps AND opens the pause menu. The pack is
+//    compiled and encrypted, so the fix is to stop feeding B.
+//
+// 2. web_input_take(): lets the host own the buttons outright — touch controls,
+//    rebinding, netplay, tests — by pulling a bitmask from JS once per tick
+//    instead of polling SDL.
+#include "RetroEngine.hpp"
+#include <emscripten.h>
+#include <emscripten/bind.h>
+
+// 0 = the engine polls SDL, 1 = the host is pulled. Flipped from JS by the SDK
+// when it claims or releases input.
+static int inputSource = 0;
+
+// Bit i of the returned mask is inputDevice[i], in InputButtons order:
+// up down left right A B C X Y Z L R start select. 0 means "everything up",
+// which is also what the SDK returns while its read is failing — a repeated
+// mask with a direction held would leave the character running on its own.
+//
+// The SDK installs the reader on the module object when it claims. Absent is
+// not an error: the source can be flipped on before the reader lands, and a
+// tick in between simply reads nothing.
+EM_JS(int, web_input_pull, (), {
+  var pull = typeof Module !== "undefined" && Module["__rsdkv4_input_pull"];
+  return pull ? pull() | 0 : 0;
+});
+
+// Both are called from Input.cpp, which declares them itself: one file, two
+// call sites, no header worth the name. Plain C++ linkage on both sides, as
+// main.cpp ↔ WebDevMenu.cpp already does it — an `extern "C"` here and not
+// there is exactly how that pairing turns into a link error.
+
+// Fold B into A while a stage is running, so the jump key stops pausing.
+//
+// The ENGINE_MAINGAME guard is load-bearing. keyPress.B is "back" in the native
+// dev menu (~10 sites in Debug.cpp) and in the pause menu (PauseMenu.cpp);
+// clearing B unconditionally leaves both with no way out.
+//
+// Chosen over remapping the defaults because it costs no key — z, x and c all
+// keep jumping, and the engine's key table is 1:1, so dropping B from it would
+// leave only two — and because it covers the gamepad for free: B's contMapping
+// is SDL_CONTROLLER_BUTTON_B, so the east button pauses today too.
+//
+// Known risk, accepted: a pack that used B for something else in-stage would
+// lose it. Sonic 1 and Sonic 2 do not.
+void web_input_fold_jump()
+{
+    if (Engine.gameMode != ENGINE_MAINGAME)
+        return;
+
+    inputDevice[INPUT_BUTTONA].press |= inputDevice[INPUT_BUTTONB].press;
+    inputDevice[INPUT_BUTTONA].hold |= inputDevice[INPUT_BUTTONB].hold;
+    inputDevice[INPUT_BUTTONB].press = false;
+    inputDevice[INPUT_BUTTONB].hold  = false;
+}
+
+// Returns 1 when the host owns input and inputDevice has just been written from
+// its mask — the caller then returns, and SDL is not polled at all this tick.
+//
+// Pull rather than push: the engine reads the host's state at the one moment it
+// is about to use it, so there is no second sampler to add phase error, no
+// write/poll race, and no coalescing of two changes inside one frame.
+int web_input_take()
+{
+    if (inputSource != 1)
+        return 0;
+
+    const int mask = web_input_pull();
+    bool anyDown   = false;
+
+    for (int i = 0; i < INPUT_ANY; ++i) {
+        if (mask & (1 << i)) {
+            inputDevice[i].setHeld();
+            anyDown = true;
+        }
+        else if (inputDevice[i].hold) {
+            inputDevice[i].setReleased();
+        }
+    }
+
+    // INPUT_ANY and the dim timer, kept in step with what the SDL paths do:
+    // without this the screen would go on dimming under a claim, however busy
+    // the player was.
+    if (anyDown) {
+        if (!inputDevice[INPUT_ANY].hold)
+            inputDevice[INPUT_ANY].setHeld();
+    }
+    else if (inputDevice[INPUT_ANY].hold) {
+        inputDevice[INPUT_ANY].setReleased();
+    }
+
+    if (inputDevice[INPUT_ANY].press || inputDevice[INPUT_ANY].hold || touches > 1)
+        Engine.dimTimer = 0;
+    else if (Engine.dimTimer < Engine.dimLimit)
+        ++Engine.dimTimer;
+
+    // The fold applies to a claiming host too: the bytecode's pause-on-B is the
+    // pack's, not the keyboard's, so a host that maps a jump button onto B
+    // would hit exactly the same thing.
+    web_input_fold_jump();
+    return 1;
+}
+
+// Claim (1) or release (0). Every button is cleared on the way through, in both
+// directions: a button the losing side had down is otherwise still down in
+// inputDevice, and the winning side never sees the release that would clear it.
+void web_input_set_source(int source)
+{
+    const int next = source == 1 ? 1 : 0;
+    if (next == inputSource)
+        return;
+
+    inputSource = next;
+    for (int i = 0; i < INPUT_MAX; ++i) inputDevice[i].setReleased();
+}
+
+int web_input_get_source() { return inputSource; }
+
+// What the engine has held right now, in the same bit order the pull uses — the
+// read-back to the pull's write. A host can check that its claim is arriving, and
+// a test can tell "the button never reached the engine" from "the game ignored
+// it", which are otherwise the same silence.
+int web_input_get_mask()
+{
+    int mask = 0;
+    for (int i = 0; i < INPUT_ANY; ++i)
+        if (inputDevice[i].hold)
+            mask |= 1 << i;
+    return mask;
+}
+
+// Which of RetroStates the engine is in — ENGINE_MAINGAME (1) while a stage runs,
+// ENGINE_WAIT (3) while the pause menu is up. The one number that says whether an
+// input did anything at all.
+int web_engine_game_mode() { return Engine.gameMode; }
+
+EMSCRIPTEN_BINDINGS(web_input)
+{
+    emscripten::function("web_input_set_source", &web_input_set_source);
+    emscripten::function("web_input_get_source", &web_input_get_source);
+    emscripten::function("web_input_get_mask", &web_input_get_mask);
+    emscripten::function("web_engine_game_mode", &web_engine_game_mode);
+}
+EOF
+
+echo "Registering WebInput.cpp in the Makefile SOURCES list..."
+python3 - "$WORK_DIR/Makefile" <<'PYEOF'
+import sys
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as f:
+    content = f.read()
+
+anchor = "          RSDKv4/Userdata.cpp      \\\n"
+assert content.count(anchor) == 1, "expected exactly one Userdata.cpp SOURCES line"
+content = content.replace(anchor, anchor + "          RSDKv4/WebInput.cpp     \\\n", 1)
+
+with open(path, "w", encoding="utf-8") as f:
+    f.write(content)
+PYEOF
+
+echo "Patching Input.cpp: the host's claim, and folding B into A in-stage..."
+# Runs after the controller patch above, which inserted its joystick scan at the
+# very top of ProcessInput — the claim goes in front of that too, since a host
+# that owns input owns the gamepad with it.
+python3 - "$WORK_DIR/RSDKv4/Input.cpp" <<'PYEOF'
+import sys
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as f:
+    content = f.read()
+
+head = "void ProcessInput()\n{\n"
+assert content.count(head) == 1, "expected exactly one ProcessInput definition"
+content = content.replace(
+    head,
+    "// WebInput.cpp. Declared here rather than in a header: one file, one caller.\n"
+    "int web_input_take();       // 1 = the host wrote inputDevice; do not poll SDL\n"
+    "void web_input_fold_jump(); // B into A while a stage runs\n"
+    "\n"
+    + head
+    + "    // The `return` is load-bearing. Falling through would reach the inputType\n"
+    "    // autoswitch at the end of this function, which hands control back to SDL\n"
+    "    // the moment a real key or pad button is touched.\n"
+    "    if (web_input_take())\n"
+    "        return;\n"
+    "\n",
+    1,
+)
+
+# …and the SDL paths get the fold on the way out. Anchored on the comment that
+# follows the function, because the `#endif }` above it is not unique on its own.
+tail = "#endif\n}\n#endif\n\n// Pretty much is this code in the original"
+assert content.count(tail) == 1, "the end of ProcessInput is not where this patch expects it"
+content = content.replace(
+    tail,
+    "#endif\n\n    web_input_fold_jump();\n}\n#endif\n\n// Pretty much is this code in the original",
+    1,
+)
+
+with open(path, "w", encoding="utf-8") as f:
+    f.write(content)
+PYEOF
+
 echo "Adding web_audio.js (main-thread half of the audio ring)..."
 cat << 'EOF' > "$WORK_DIR/RSDKv4/web_audio.js"
 // The main-thread half of the engine's audio ring. Linked with --js-library, and

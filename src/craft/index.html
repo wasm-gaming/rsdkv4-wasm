@@ -14,11 +14,20 @@
   <script src="../coi.js"></script>
 
   <!-- The demo imports the SDK by package name, the way a real host would; the
-       import map points that at the built files in dist/rsdkv4/. -->
+       import map points that at the built files in dist/rsdkv4/.
+
+       engine-specs is in here because the contract stopped being types-only in
+       0.3.2: the built rsdkv4.sdk.js opens with a real
+       `import { EnginePlayBase, EngineSDKBase, EventEmitter } from
+       '@wasm-gaming/engine-specs'`. A bundler would resolve that; a page served
+       straight out of dist/ has only this map, and without the entry the browser
+       refuses the module before a line of craft's own code runs. `make
+       build-specs` is what puts ../engine-specs.js there. -->
   <script type="importmap">
     {
       "imports": {
-        "@wasm-gaming/rsdkv4-wasm": "../rsdkv4/rsdkv4.sdk.js"
+        "@wasm-gaming/rsdkv4-wasm": "../rsdkv4/rsdkv4.sdk.js",
+        "@wasm-gaming/engine-specs": "../engine-specs.js"
       }
     }
   </script>

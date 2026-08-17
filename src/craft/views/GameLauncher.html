@@ -34,12 +34,14 @@
             NO SAVE
         </button>
 
+        <!-- `i` es el índice 0-based del :each, y RSDKv4 numera sus cuatro slots
+             0-3 — que es justo lo que espera game.start(slot, player). -->
         <div :each="slotNum, i in [1, 2, 3, 4]" slot-card in-memory>
             <button type="button" player-choose @click="nextPlayer(i)" :player="players[selectedPlayer[i]]">
                 <img :src="`./assets/player-${players[selectedPlayer[i]]}.svg`" />
             </button>
             <button type="button" play @click="$emit('launch', {
-                slot: i - 1,
+                slot: i,
                 player: selectedPlayer[i],
             })">
                 PLAY

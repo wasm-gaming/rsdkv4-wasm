@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Put one version in every place that carries one.
 //
-// The version lives twice: `package.json`, and the `version` field of the typed
-// manifest in src/rsdkv4.manifest.ts — which `emit-manifest.mjs` serializes
-// into dist/manifest.json, and which `files` publishes as TypeScript source on
-// top of that. `npm version` only knows about the first, so a bump on its own
-// ships a package whose manifest claims the previous release.
+// The version lives twice: `package.json`, and the `static readonly version` of
+// `Rsdkv4SDK` in src/rsdkv4.sdk.ts — which is where the contract puts an
+// engine's identity as of engine-specs 0.3.0, so a launcher reads
+// `Rsdkv4SDK.version` off the imported class. `npm version` only knows about the
+// first, so a bump on its own ships a class claiming the previous release.
 //
 //   node scripts/sync-version.mjs           # take package.json as the truth
 //   node scripts/sync-version.mjs 0.2.0     # set that version everywhere
@@ -52,24 +52,24 @@ if (lock.version !== version || lock.packages?.['']?.version !== version) {
   changed.push('package-lock.json');
 }
 
-// --- src/rsdkv4.manifest.ts --------------------------------------------------
+// --- src/rsdkv4.sdk.ts -------------------------------------------------------
 // A string literal in a hand-written file, so this is a targeted rewrite rather
-// than a regeneration. Anchored to the indentation it sits at inside the
-// manifest object, and asserted to match exactly once — a second `version:` in
-// this file means the anchor stopped being unambiguous and this script needs
-// revisiting rather than guessing.
-const manifestPath = 'src/rsdkv4.manifest.ts';
-const source = read(manifestPath);
-const pattern = /^(\s+version: ')([^']*)(',)$/gm;
+// than a regeneration. Anchored to the `static readonly` it is declared with,
+// and asserted to match exactly once — a second one in this file means the
+// anchor stopped being unambiguous and this script needs revisiting rather than
+// guessing.
+const sdkPath = 'src/rsdkv4.sdk.ts';
+const source = read(sdkPath);
+const pattern = /^(\s+static readonly version = ')([^']*)(';)$/gm;
 const matches = [...source.matchAll(pattern)];
 
 if (matches.length !== 1) {
-  die(`expected exactly one \`version: '…'\` in ${manifestPath}, found ${matches.length}`);
+  die(`expected exactly one \`static readonly version = '…'\` in ${sdkPath}, found ${matches.length}`);
 }
 
 if (matches[0][2] !== version) {
-  write(manifestPath, source.replace(pattern, `$1${version}$3`));
-  changed.push(manifestPath);
+  write(sdkPath, source.replace(pattern, `$1${version}$3`));
+  changed.push(sdkPath);
 }
 
 console.log(changed.length ? `sync-version: ${version} → ${changed.join(', ')}` : `sync-version: already at ${version}`);

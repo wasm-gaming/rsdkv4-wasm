@@ -21,29 +21,23 @@
     "./options": {
       "types": "./dist/rsdkv4/rsdkv4.options.d.ts",
       "import": "./dist/rsdkv4/rsdkv4.options.js"
-    },
-    "./manifest": "./dist/manifest.json"
+    }
   },
   "files": [
     "dist/rsdkv4/",
-    "dist/manifest.json",
-    "src/rsdkv4.manifest.ts",
     "src/rsdkv4.options.ts",
     "src/rsdkv4.sdk.ts",
     "README.md"
   ],
   "comment:scripts": "Build logic lives in the Makefile, not here (make build / build-sdk / build-wasm / preview).",
   "scripts": {},
+  "comment:peer": "No longer optional, and no longer types-only: 0.3.2 ships the base classes and the EventEmitter this SDK extends, so the contract is a real runtime import. A host must resolve it (bundler, or an import map entry pointing at dist/engine-specs.js).",
   "peerDependencies": {
-    "@wasm-gaming/engine-specs": ">=0.2.0"
-  },
-  "peerDependenciesMeta": {
-    "@wasm-gaming/engine-specs": {
-      "optional": true
-    }
+    "@wasm-gaming/engine-specs": "^0.3.2"
   },
   "devDependencies": {
-    "@wasm-gaming/engine-specs": "^0.2.6",
+    "@wasm-gaming/engine-specs": "^0.3.2",
+    "jq79": "^0.5.10",
     "typedoc": "^0.28.20",
     "typescript": "^5.5.0"
   },

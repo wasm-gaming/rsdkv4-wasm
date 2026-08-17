@@ -1,21 +1,27 @@
 
 import { $reactive } from 'https://jgermade.github.io/jq79/jq79.js';
 import { opfsService } from './opfs.service.js';
-import sdk from '@wasm-gaming/rsdkv4-wasm';   // ya mapeado en el importmap de craft/index.html
+import Rsdkv4SDK from '@wasm-gaming/rsdkv4-wasm';   // ya mapeado en el importmap de craft/index.html
 
-// const instance = await sdk.load({
-//   attachTo: mountEl,                      // el SDK crea el <canvas id="canvas"> y lo escala solo
-//   storageNamespace: `rsdkv4/${gameId}`,   // mismo layout OPFS que opfs.service.js (LIBRARY_DIR)
-//   dataProvider: () => opfsService.readFileFromOPFS(`${gameId}/Data.rsdk`).then(f => f.arrayBuffer()),
-//   options: { skipStartMenu: true },
-//   onEvent: (e) => { if (e.type === 'error') console.error(e.error) },
-// })
-// instance.game.start(slot, player)  // slot 0-3, o null = NO SAVE
+// El SDK es una clase encadenable, no un `sdk.load(config)`:
+//
+//   const play = await new Rsdkv4SDK()
+//     .mount(el)                              // un <canvas> se usa tal cual; otro elemento y lo crea dentro
+//     .assets({ data: () => bytes })          // Data.rsdk: el thunk sólo se llama si no hay copia guardada
+//     .storage({ namespace: `rsdkv4/${gameId}` })
+//     .config({ startMenu: 'host' })          // las pantallas de save/personaje las pinta craft
+//     .start()
+//   play.game.start(slot, player)             // slot 0-3, o null = NO SAVE
 
 
 export const gameService = $reactive({
   selectedGame: null,
   isRunning: false,
+  isLaunched: false,
+
+  /** El motor vivo, y con qué pack arrancó — ver launchGame. */
+  play: null,
+  playingGameId: null,
 
   games: {
     'Sonic1': {
@@ -136,19 +142,38 @@ export const gameService = $reactive({
       player,
     })
     
-    this.instance = {
-      running: await sdk.load({
-        ...el?.nodeName === 'CANVAS'
-          ? { canvasEl: el }
-          : { attachTo: el },
-        storageNamespace: `rsdkv4/${gameId}`,   // mismo layout OPFS que opfs.service.js (LIBRARY_DIR)
-        dataProvider: () => opfsService.readFileFromOPFS(`${gameId}/Data.rsdk`).then(f => f.arrayBuffer()),
-        options: { skipStartMenu: true },
-        onEvent: (e) => { if (e.type === 'error') console.error(e.error) },
-      }),
+    // Un motor cada vez, y un pack distinto pide uno nuevo: Data.rsdk se lee
+    // mientras arranca el wasm, así que cambiar de juego es un boot y no un
+    // restart().
+    if (this.play && this.playingGameId !== gameId) {
+      await this.play.destroy()
+      this.play = null
+      this.playingGameId = null
     }
 
-    this.instance.running.game.start(slot, player)
+    this.isLaunched = true
+
+    if (!this.play) {
+      // `mount` acepta el <canvas> del propio App.html y lo usa tal cual — no
+      // añade otro ni toca la maquetación; sólo le pone el id que SDL busca.
+      this.play = await new Rsdkv4SDK()
+        .mount(el)
+        .assets({
+          data: () => opfsService.readFileFromOPFS(`${gameId}/Data.rsdk`).then(f => f.arrayBuffer()),
+        })
+        .storage({ namespace: `rsdkv4/${gameId}` })   // mismo layout OPFS que opfs.service.js (LIBRARY_DIR)
+        .config({ startMenu: 'host' })                // antes: options.skipStartMenu
+        .on('error', ({ detail }) => console.error('[rsdkv4]', detail))
+        .start()
+
+      this.playingGameId = gameId
+    }
+
+    // La forma por índice, que es la que tiene esta UI. `start({ player })` del
+    // contrato quiere el *nombre* del personaje tal y como lo declara el pack, y
+    // las etiquetas de craft ('sonictails') no son esos nombres: un nombre
+    // desconocido es un error, no un Sonic silencioso.
+    this.play.game.start(slot, player)
     this.isRunning = true;
   },
 })

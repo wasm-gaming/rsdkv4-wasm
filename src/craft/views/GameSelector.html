@@ -54,7 +54,7 @@
 <section game-seletor>
     <div container>
       <button logo @click="selectGame(null)">
-        <img src="/craft/assets/Logo_Sonic.svg" alt="Sonic the Hedgehog" />
+        <img src="./assets/Logo_Sonic.svg" alt="Sonic the Hedgehog" />
       </button>
     </div>
     <div game-choose>
@@ -63,8 +63,8 @@
             :disabled="!gameService.games[gameId]?.loaded"
             :active="gameService.selectedGame?.id && gameService.selectedGame.id === gameId || null"
         >
-            <img bg :src="`/craft/assets/${gameId}.svg`" alt="Sonic the Hedgehog" />
-            <img fg :src="`/craft/assets/${gameId}.svg`" alt="Sonic the Hedgehog" />
+            <img bg :src="`./assets/${gameId}.svg`" alt="Sonic the Hedgehog" />
+            <img fg :src="`./assets/${gameId}.svg`" alt="Sonic the Hedgehog" />
             <button
                 @click="() => console.log(gameId) || selectGame(gameId)"
             />
