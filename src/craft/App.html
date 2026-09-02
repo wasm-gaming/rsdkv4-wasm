@@ -1,4 +1,3 @@
-
 <script :setup>
   const { opfsService = {} } = await import('./services/opfs.service.js');
   const { gameService = {} } = await import('./services/game.service.js');
@@ -11,22 +10,22 @@
   console.log('Component79 version is ', Component79.version);
 
   $: anyGameLoaded = Object
-      .entries(gameService.games)
-      .some(([gameId, game]) => game.loaded)
+    .entries(gameService.games)
+    .some(([gameId, game]) => game.loaded)
 
   $: $('body').classList.toggle('is-launched', gameService.isLaunched)
   $: $('body').classList.toggle('is-running', gameService.isRunning)
 
   const [
-      CHeader,
-      DropForm,
-      EscMenu,
-      CFooter,
+    CHeader,
+    DropForm,
+    EscMenu,
+    CFooter,
   ] = await Component79.fetchAll([
-      './layout/header.html',
-      './components/DropForm.html',
-      './components/EscMenu.html',
-      './layout/footer.html',
+    './layout/header.html',
+    './components/DropForm.html',
+    './components/EscMenu.html',
+    './layout/footer.html',
   ]);
 
   // await opfsService.readFilesInOPFS();
@@ -51,29 +50,118 @@
       slot, player,
     })
   }
+
+  // Navegación por teclado global para selección de juego y lanzador
+  window.addEventListener('keydown', (e) => {
+    if (gameService.isRunning || ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
+      return;
+    }
+
+    const key = e.key;
+
+    const gameButtons = Array.from(document.querySelectorAll('[game-choose] [game] button'));
+    const slotButtons = Array.from(document.querySelectorAll('[slot-cards] button[play], [slot-cards] button[no-save]'));
+
+    const activeEl = document.activeElement;
+    const isGameFocused = gameButtons.includes(activeEl);
+    const isSlotFocused = slotButtons.includes(activeEl);
+
+    if (key === 'ArrowDown') {
+      e.preventDefault();
+      if (slotButtons.length > 0) {
+        if (isGameFocused) {
+          const gameIdx = Math.max(0, gameButtons.indexOf(activeEl));
+          const targetSlotIdx = Math.min(gameIdx, slotButtons.length - 1);
+          slotButtons[targetSlotIdx]?.focus();
+        } else if (!isSlotFocused) {
+          slotButtons[0]?.focus();
+        }
+      }
+    } else if (key === 'ArrowUp') {
+      e.preventDefault();
+      if (gameButtons.length > 0) {
+        if (isSlotFocused) {
+          const slotIdx = slotButtons.indexOf(activeEl);
+          const targetGameIdx = Math.min(slotIdx, gameButtons.length - 1);
+          gameButtons[targetGameIdx]?.focus();
+        } else if (!isGameFocused) {
+          gameButtons[0]?.focus();
+        }
+      }
+    } else if (key === 'ArrowRight') {
+      if (isGameFocused) {
+        e.preventDefault();
+        const idx = gameButtons.indexOf(activeEl);
+        const nextIdx = (idx + 1) % gameButtons.length;
+        gameButtons[nextIdx]?.focus();
+      } else if (isSlotFocused) {
+        e.preventDefault();
+        const idx = slotButtons.indexOf(activeEl);
+        const nextIdx = (idx + 1) % slotButtons.length;
+        slotButtons[nextIdx]?.focus();
+      } else if (!gameService.selectedGame) {
+        e.preventDefault();
+        const loadedGames = Object.keys(gameService.games).filter(id => gameService.games[id]?.loaded);
+        if (loadedGames.length > 0) gameService.selectGame(loadedGames[0]);
+      }
+    } else if (key === 'ArrowLeft') {
+      if (isGameFocused) {
+        e.preventDefault();
+        const idx = gameButtons.indexOf(activeEl);
+        const prevIdx = (idx - 1 + gameButtons.length) % gameButtons.length;
+        gameButtons[prevIdx]?.focus();
+      } else if (isSlotFocused) {
+        e.preventDefault();
+        const idx = slotButtons.indexOf(activeEl);
+        const prevIdx = (idx - 1 + slotButtons.length) % slotButtons.length;
+        slotButtons[prevIdx]?.focus();
+      } else if (!gameService.selectedGame) {
+        e.preventDefault();
+        const loadedGames = Object.keys(gameService.games).filter(id => gameService.games[id]?.loaded);
+        if (loadedGames.length > 0) gameService.selectGame(loadedGames[0]);
+      }
+    } else if (key === '1' && gameService.games.Sonic1?.loaded) {
+      if (!gameService.selectedGame || gameService.selectedGame.id !== 'Sonic1') {
+        gameService.selectGame('Sonic1');
+      }
+    } else if (key === '2' && gameService.games.Sonic2?.loaded) {
+      if (!gameService.selectedGame || gameService.selectedGame.id !== 'Sonic2') {
+        gameService.selectGame('Sonic2');
+      }
+    } else if (key === 'Escape') {
+      if (gameService.selectedGame) {
+        gameService.selectGame(null);
+      }
+    } else if (key.toLowerCase() === 'n' && gameService.selectedGame) {
+      onLaunch({ detail: { slot: null, player: 1 } });
+    }
+  });
 </script>
 
-<CHeader
-  @files="onFiles"
-/>
-<DropForm
-  @files="onFiles"
-/>
+<CHeader @files="onFiles" />
+<DropForm @files="onFiles" />
 <section main>
   <div canvas :running="gameService.isRunning ? '' : null">
     <canvas></canvas>
   </div>
   <div container>
     <GameSelector />
-    <div :if="!anyGameLoaded">
-      Drop game Data.rsdk
+    <div :if="!anyGameLoaded" games-hint no-games>
+      <div hint-badge>📁 Cargar Datos de Juego</div>
+      <div hint-body>
+        <strong>No hay archivos Data.rsdk cargados</strong>
+        <span>Arrastra y suelta tu archivo <code>Data.rsdk</code> en cualquier parte de la pantalla o haz clic en los
+          logos de Sonic 1 / Sonic 2 para seleccionar tu archivo.</span>
+      </div>
     </div>
-    <GameLauncher
-      :elseif="gameService.selectedGame"
-      @launch="onLaunch"
-    />
-    <div :else>
-      Choose a game to play
+    <GameLauncher :elseif="gameService.selectedGame" @launch="onLaunch" />
+    <div :else games-hint games-ready>
+      <div hint-badge>🎮 Juegos Listos</div>
+      <div hint-body>
+        <strong>¡Archivos Data.rsdk cargados y listos!</strong>
+        <span>Haz clic en <strong>Sonic 1</strong> o <strong>Sonic 2</strong> arriba o presiona la tecla <kbd>1</kbd> o
+          <kbd>2</kbd> en tu teclado para elegir un juego.</span>
+      </div>
     </div>
   </div>
 </section>
@@ -100,12 +188,91 @@
     }
   }
 
+  [games-hint] {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    margin-top: 7rem;
+    padding: 0.85rem 1.4rem;
+    max-width: 580px;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    text-align: center;
+    color: #e2e8f0;
+    line-height: 1.4;
+
+    &[no-games] [hint-badge] {
+      background: rgba(239, 68, 68, 0.2);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.35);
+    }
+
+    &[games-ready] [hint-badge] {
+      background: rgba(34, 197, 94, 0.2);
+      color: #86efac;
+      border: 1px solid rgba(34, 197, 94, 0.35);
+    }
+
+    [hint-badge] {
+      font-size: 0.65rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      padding: 0.2rem 0.6rem;
+      border-radius: 20px;
+      text-transform: uppercase;
+    }
+
+    [hint-body] {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      font-size: 0.82rem;
+
+      strong {
+        color: #ffffff;
+        font-size: 0.92rem;
+      }
+
+      code {
+        background: rgba(255, 255, 255, 0.15);
+        padding: 0.1rem 0.35rem;
+        border-radius: 4px;
+        font-family: monospace;
+        color: #fbbf24;
+      }
+
+      kbd {
+        background: rgba(255, 255, 255, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 3px;
+        padding: 0.1rem 0.4rem;
+        font-family: monospace;
+        font-size: 0.75rem;
+        color: #ffffff;
+        font-weight: bold;
+      }
+    }
+  }
+
+  body.is-launched & {
+    animation: fadeOut .4s ease-out forwards;
+    pointer-events: none;
+    /* animation: fadeInUp .4s ease-out forwards; */
+  }
+  }
+
   [logo] {
     display: flex;
     align-items: center;
     justify-content: center;
     margin-top: -3.5rem;
-    
+
     img {
       width: 450px;
       max-width: 100%;
@@ -132,7 +299,8 @@
 
     &[running] {
       z-index: 1;
-      & ~ * {
+
+      &~* {
         display: none;
       }
     }
