@@ -74,10 +74,24 @@ echo "Setting up workspace..."
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR" "$DIST_DIR"
 
-echo "Cloning or copying Sonic-Decompilation-WASM repository..."
-if [ -d "$ROOT_DIR/.tmp/test-clone" ]; then
-  cp -R "$ROOT_DIR/.tmp/test-clone/." "$WORK_DIR/"
+# RSDKV4_SRC=<path> builds from a checkout that is already on disk instead of
+# cloning one. It exists because the emsdk container does not always have network
+# — scripts/build-docker.sh clones on the host, where it does, and points this at
+# the result — and because a copy is a great deal faster than a clone on every
+# rebuild.
+#
+# Deliberately opt-in and loud. An earlier version of this script picked up
+# .tmp/test-clone whenever that directory happened to exist, which meant the build
+# could silently source from an unversioned local copy and nobody would know.
+# Unset, this clones, which is what CI does.
+if [ -n "${RSDKV4_SRC:-}" ]; then
+  echo "Copying Sonic-Decompilation-WASM from RSDKV4_SRC=$RSDKV4_SRC ..."
+  [ -d "$RSDKV4_SRC" ] || { echo "RSDKV4_SRC is set but $RSDKV4_SRC is not a directory"; exit 1; }
+  [ -f "$RSDKV4_SRC/RSDKv4/Input.cpp" ] || { echo "RSDKV4_SRC does not look like an RSDKv4 checkout (no RSDKv4/Input.cpp)"; exit 1; }
+  cp -R "$RSDKV4_SRC/." "$WORK_DIR/"
+  rm -rf "$WORK_DIR/.git"
 else
+  echo "Cloning Sonic-Decompilation-WASM repository..."
   git clone --depth=1 https://github.com/mattConn/Sonic-Decompilation-WASM.git "$WORK_DIR"
 fi
 
@@ -380,15 +394,34 @@ EM_JS(int, web_input_pull, (), {
 //
 // Known risk, accepted: a pack that used B for something else in-stage would
 // lose it. Sonic 1 and Sonic 2 do not.
-void web_input_fold_jump()
+//
+// Takes the *raw* held state and is applied before the press/hold transitions are
+// worked out. This used to run the other way round — fold inputDevice after the
+// transitions, clearing B's press and hold — and that was a bug, because `hold` is
+// not only an output. It is the memory the next tick's edge detection reads to
+// decide whether a key that is down is *newly* down. Clearing it every tick made
+// every held frame look like a fresh press, so holding the jump key emitted a
+// button-A press sixty times a second: instant re-jump on landing, and a spindash
+// that charged on hold instead of per tap. Folding the input rather than the
+// result leaves the edge detection a truthful memory to read.
+void web_input_fold_jump(bool *held)
 {
-    if (Engine.gameMode != ENGINE_MAINGAME)
-        return;
+    // Whether the fold swallowed a held B last tick. If it did, and the fold has
+    // just let go — the pause menu opening under a held jump key — then B is not
+    // newly pressed however it looks to the edge detection, and seeding the hold
+    // says so. Without it the menu takes a phantom "back" on the frame it opens.
+    static bool foldedHeldB = false;
 
-    inputDevice[INPUT_BUTTONA].press |= inputDevice[INPUT_BUTTONB].press;
-    inputDevice[INPUT_BUTTONA].hold |= inputDevice[INPUT_BUTTONB].hold;
-    inputDevice[INPUT_BUTTONB].press = false;
-    inputDevice[INPUT_BUTTONB].hold  = false;
+    if (Engine.gameMode == ENGINE_MAINGAME) {
+        held[INPUT_BUTTONA] = held[INPUT_BUTTONA] || held[INPUT_BUTTONB];
+        foldedHeldB         = held[INPUT_BUTTONB];
+        held[INPUT_BUTTONB] = false;
+        return;
+    }
+
+    if (foldedHeldB && held[INPUT_BUTTONB])
+        inputDevice[INPUT_BUTTONB].hold = true;
+    foldedHeldB = false;
 }
 
 // Returns 1 when the host owns input and inputDevice has just been written from
@@ -403,10 +436,19 @@ int web_input_take()
         return 0;
 
     const int mask = web_input_pull();
-    bool anyDown   = false;
+
+    // The fold applies to a claiming host too: the bytecode's pause-on-B is the
+    // pack's, not the keyboard's, so a host that maps a jump button onto B would
+    // hit exactly the same thing. Before the transitions, for the reason spelled
+    // out over web_input_fold_jump().
+    bool held[INPUT_ANY];
+    for (int i = 0; i < INPUT_ANY; ++i) held[i] = (mask & (1 << i)) != 0;
+    web_input_fold_jump(held);
+
+    bool anyDown = false;
 
     for (int i = 0; i < INPUT_ANY; ++i) {
-        if (mask & (1 << i)) {
+        if (held[i]) {
             inputDevice[i].setHeld();
             anyDown = true;
         }
@@ -431,10 +473,6 @@ int web_input_take()
     else if (Engine.dimTimer < Engine.dimLimit)
         ++Engine.dimTimer;
 
-    // The fold applies to a claiming host too: the bytecode's pause-on-B is the
-    // pack's, not the keyboard's, so a host that maps a jump button onto B
-    // would hit exactly the same thing.
-    web_input_fold_jump();
     return 1;
 }
 
@@ -506,18 +544,48 @@ with open(path, "r", encoding="utf-8") as f:
     content = f.read()
 
 helper = """// WebInput.cpp. Declared here rather than in a header: one file, one caller.
-int web_input_take();       // 1 = the host wrote inputDevice; do not poll SDL
-void web_input_fold_jump(); // B into A while a stage runs
+int web_input_take();                 // 1 = the host wrote inputDevice; do not poll SDL
+void web_input_fold_jump(bool *held); // B into A while a stage runs
 
-static inline bool isKeyHeld(int buttonIdx, const byte *keyState) {
-    if (keyState[inputDevice[buttonIdx].keyMappings]) return true;
+// WASD as a second set of directions, alongside the arrows.
+//
+// It is a convenience, not a fix. It was added on the theory that the arrow keys
+// were ghosting on the reporter's keyboard; measuring the browser afterwards showed
+// seven simultaneous keys and every arrow combination arriving intact, so that
+// theory is dead. Kept because plenty of players reach for WASD anyway.
+static inline bool isWasdAlias(int scancode)
+{
+    return scancode == SDL_SCANCODE_W || scancode == SDL_SCANCODE_A || scancode == SDL_SCANCODE_S
+           || scancode == SDL_SCANCODE_D;
+}
+
+static inline bool isKeyHeld(int buttonIdx, const byte *keyState, int length)
+{
     switch (buttonIdx) {
-        case INPUT_UP:    return keyState[SDL_SCANCODE_W];
-        case INPUT_DOWN:  return keyState[SDL_SCANCODE_S];
-        case INPUT_LEFT:  return keyState[SDL_SCANCODE_A];
-        case INPUT_RIGHT: return keyState[SDL_SCANCODE_D];
-        default: return false;
+        case INPUT_UP:    if (keyState[SDL_SCANCODE_W]) return true; break;
+        case INPUT_DOWN:  if (keyState[SDL_SCANCODE_S]) return true; break;
+        case INPUT_LEFT:  if (keyState[SDL_SCANCODE_A]) return true; break;
+        case INPUT_RIGHT: if (keyState[SDL_SCANCODE_D]) return true; break;
+
+        // The aliases above take W/A/S/D away from whoever else holds them, which by
+        // default is X, Y and Z: Userdata.cpp binds them to A, S and D. Left alone,
+        // one physical key would raise a direction *and* a face button. Nothing in
+        // the native code reads X/Y/Z (checked: PauseMenu.cpp, Debug.cpp, Scene.cpp),
+        // but a pack's bytecode can, and a double binding nobody chose is not worth
+        // leaving in.
+        default:
+            if (isWasdAlias(inputDevice[buttonIdx].keyMappings))
+                return false;
+            break;
     }
+
+    // Bounds-checked, unlike the code this replaces: keyMappings comes out of
+    // settings.ini, so a hand-edited file is an out-of-bounds read on SDL's array.
+    const int scancode = inputDevice[buttonIdx].keyMappings;
+    if (scancode < 0 || scancode >= length)
+        return false;
+
+    return keyState[scancode] != 0;
 }
 """
 
@@ -545,22 +613,29 @@ new_process_input = """void ProcessInput()
     int length           = 0;
     const byte *keyState = SDL_GetKeyboardState(&length);
 
+    // Sampled first, folded second, turned into press/hold transitions third. The
+    // order is the whole point: setHeld() reads `hold` to decide whether a key that
+    // is down is newly down, so anything that rewrites `hold` has to happen before
+    // it and not after. See web_input_fold_jump() in WebInput.cpp.
+    //
+    // Keyboard and pad are OR-ed rather than selected between. Retail polls one or
+    // the other on an `inputType` that this build's controller-init loop can flip to
+    // the pad on its own, and a keyboard that stops being read is not a state worth
+    // being able to reach.
+    bool held[INPUT_ANY];
+    for (int i = 0; i < INPUT_ANY; i++)
+        held[i] = isKeyHeld(i, keyState, length) || getControllerButton(inputDevice[i].contMappings);
+
+    web_input_fold_jump(held);
+
     bool anyHeld = false;
     for (int i = 0; i < INPUT_ANY; i++) {
-        bool held = isKeyHeld(i, keyState) || getControllerButton(inputDevice[i].contMappings);
-        if (held) {
-            if (!inputDevice[i].hold) {
-                inputDevice[i].press = true;
-                inputDevice[i].hold  = true;
-            }
-            else {
-                inputDevice[i].press = false;
-            }
+        if (held[i]) {
+            inputDevice[i].setHeld();
             anyHeld = true;
         }
-        else {
-            inputDevice[i].press = false;
-            inputDevice[i].hold  = false;
+        else if (inputDevice[i].hold) {
+            inputDevice[i].setReleased();
         }
     }
 
@@ -579,8 +654,6 @@ new_process_input = """void ProcessInput()
         ++Engine.dimTimer;
     }
 #endif
-
-    web_input_fold_jump();
 }"""
 
 anchor_head = "void ProcessInput()\n{\n"

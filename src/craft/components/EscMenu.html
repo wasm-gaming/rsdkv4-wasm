@@ -1,0 +1,154 @@
+
+<script :setup>
+  const { gameService } = await import('../services/game.service.js');
+  const { inputProbe } = await import('../services/input-probe.service.js');
+
+  // Quien abre el overlay pausa con su propio nombre y reanuda con el mismo. El
+  // SDK sólo deja reanudar al dueño de la pausa, así que este menú no puede
+  // despausar una partida que estuviera parada por otra cosa.
+  const PAUSE_OWNER = 'esc-menu';
+
+  let escOpen = false;
+
+  const closeMenu = () => {
+    if (!escOpen) return;
+    escOpen = false;
+    gameService.play?.resume(PAUSE_OWNER);
+    // SDL lee el teclado del canvas, y el overlay se llevó el foco al abrirse:
+    // sin devolverlo, las flechas del jugador no van a ninguna parte.
+    $('canvas')?.focus({ preventScroll: true });
+  };
+
+  const openMenu = () => {
+    if (escOpen) return;
+    escOpen = true;
+    gameService.play?.pause(PAUSE_OWNER);
+  };
+
+  const toggleProbe = () => inputProbe.toggle(gameService.play);
+
+  const onKeyDown = (event) => {
+    if (event.key !== 'Escape' || !gameService.isRunning) return;
+
+    // Escape es la única tecla que este menú se queda. preventDefault no basta:
+    // el handler de SDL vive en window en fase de burbuja y leería la tecla de
+    // todas formas, y RSDKv4 abre su dev menu nativo con ella. Cortar aquí, en
+    // captura, es lo que se lo impide — y por eso la condición de arriba es tan
+    // estrecha: parar cualquier otra tecla sería quitarle el teclado al motor.
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (escOpen) closeMenu();
+    else openMenu();
+  };
+
+  // Un único listener por página, siempre el del menú vivo. El servidor de
+  // desarrollo intercambia componentes en caliente, así que `:setup` puede volver
+  // a correr sobre una página que ya tenía uno puesto; sin esto quedaría el viejo
+  // suscrito, con su propio `escOpen` en el closure, cortando Escape para siempre.
+  if (window.__craftEscKeyHandler) {
+    window.removeEventListener('keydown', window.__craftEscKeyHandler, true);
+  }
+  window.__craftEscKeyHandler = onKeyDown;
+  window.addEventListener('keydown', onKeyDown, true);
+</script>
+
+<div esc-menu :if="escOpen">
+  <div esc-panel>
+    <h2>Pausa</h2>
+
+    <button type="button" @click="closeMenu()">Reanudar</button>
+
+    <button type="button" data-probe :on="inputProbe.active ? '' : null" @click="toggleProbe()">
+      Sonda de input
+      <small>{{ inputProbe.active ? 'activada' : 'desactivada' }}</small>
+    </button>
+
+    <a href="../input-doctor/" target="_blank" rel="noopener">
+      Input doctor
+      <small>prueba de teclas del navegador, en otra pestaña</small>
+    </a>
+
+    <p esc-hint>
+      La sonda pinta dos filas abajo a la izquierda: lo que el navegador tiene
+      pulsado y lo que el motor tiene retenido. Si una tecla enciende la de arriba
+      y no la de abajo, se pierde antes de llegar al juego.
+    </p>
+  </div>
+</div>
+
+<style scoped>
+  [esc-menu] {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, .5);
+    backdrop-filter: blur(6px);
+  }
+
+  [esc-panel] {
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+    min-width: 300px;
+    padding: 1.25rem;
+    border-radius: .75rem;
+    border: 2px solid black;
+    background: #333;
+    color: white;
+    font-family: system-ui, sans-serif;
+
+    h2 {
+      margin: 0 0 .25rem;
+      font-size: 1rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: #9aa3af;
+    }
+
+    button, a {
+      all: unset;
+      box-sizing: border-box;
+      display: block;
+      padding: .6rem .75rem;
+      border-radius: .375rem;
+      background: #1b1e24;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+
+      &:hover:not(:active) {
+        background: #262b33;
+      }
+
+      small {
+        display: block;
+        font-weight: normal;
+        color: #9aa3af;
+      }
+    }
+
+    button[data-probe][on] {
+      background: royalblue;
+
+      &:hover:not(:active) {
+        background: blue;
+      }
+
+      small {
+        color: #dbeafe;
+      }
+    }
+  }
+
+  [esc-hint] {
+    margin: .25rem 0 0;
+    max-width: 34ch;
+    font-size: .75rem;
+    line-height: 1.5;
+    color: #9aa3af;
+  }
+</style>

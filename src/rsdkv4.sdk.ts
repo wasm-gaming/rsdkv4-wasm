@@ -129,6 +129,34 @@ const INPUT_PULL_HOOK = '__rsdkv4_input_pull';
 /** How often a pull that keeps throwing is allowed to say so. See {@link Rsdkv4Play}. */
 const INPUT_ERROR_INTERVAL_MS = 1000;
 
+/**
+ * Keys whose browser default action is swallowed while the canvas has focus — the
+ * arrows and Space scroll the page under the game, Tab takes the focus off the canvas
+ * and with it every key the engine was reading.
+ *
+ * Both `KeyboardEvent.code` and `.key` spellings are in here because the set is
+ * matched against each: `code` is the physical key (layout-independent, which is what
+ * the engine binds), `key` is what it produced, and a browser or a remapping tool that
+ * reports only one of the two still lands.
+ *
+ * WASD is included because this build's `ProcessInput()` reads those scancodes as a
+ * second set of directions. They have no default action to prevent today, so this
+ * costs nothing and stops mattering the day the page grows a shortcut on one of them.
+ */
+const ENGINE_KEYS = new Set([
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'KeyW',
+  'KeyA',
+  'KeyS',
+  'KeyD',
+  'Space',
+  ' ',
+  'Tab',
+]);
+
 /** The Emscripten module. Untyped on purpose: it is generated glue, not our surface. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type EmscriptenModule = any;
@@ -403,6 +431,34 @@ export interface RsdkInputBridge {
   release(): PromisePlay<Rsdkv4Payloads>;
   /** Whether a claim is held. The `options()` descriptor deliberately will not say. */
   readonly claimed: boolean;
+  /**
+   * What the engine has held **right now**, as the bitmask a claim writes: bit 0 is
+   * `up`, bit 13 is `select`, in {@link RSDKV4_BUTTONS} order.
+   *
+   * This is the read-back to the claim's write, and it answers the one question no
+   * amount of listening on the page can: *did the button reach the engine?* A key
+   * that fires `keydown` in the browser and never lights a bit here died between SDL
+   * and `ProcessInput()`; one that lights the bit and changes nothing on screen was
+   * received and the game chose not to act on it. Those two are otherwise the same
+   * silence, and telling them apart is the difference between a real input bug and
+   * Sonic simply refusing to roll while a direction is held.
+   *
+   * Works whether or not a claim is held — under SDL polling it is the keyboard and
+   * the pad as the engine read them. `0` when the engine is not up.
+   *
+   * Two things it is not. It is `hold`, not `press`: a button reads the same on the
+   * frame it goes down and on the hundredth frame it stays down. And it is the
+   * engine's view *after* the B→A fold, so in-stage the jump key `x` lights `a` and
+   * `b` never lights at all — which is the fold working, not a lost button.
+   */
+  readonly mask: number;
+  /**
+   * {@link mask}, spelled as the fourteen named booleans — the same shape a claim
+   * hands over, so a host can diff what it sent against what arrived.
+   *
+   * A fresh object on every read; it is a snapshot, not a live view.
+   */
+  readonly held: Rsdkv4Buttons;
 }
 
 /**
@@ -770,7 +826,32 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
       get claimed(): boolean {
         return play.#buttons !== null;
       },
+      get mask(): number {
+        return play.#engineMask();
+      },
+      get held(): Rsdkv4Buttons {
+        const mask = play.#engineMask();
+        const held = {} as Rsdkv4Buttons;
+        for (let bit = 0; bit < RSDKV4_BUTTONS.length; bit++) {
+          held[RSDKV4_BUTTONS[bit]] = (mask & (1 << bit)) !== 0;
+        }
+        return held;
+      },
     };
+  }
+
+  /**
+   * The engine's own `web_input_get_mask()`, or 0 when there is no engine to ask.
+   *
+   * Deliberately quiet about a module that does not have the bridge: unlike a claim,
+   * which silently does nothing and deserves the console error `#applyButtons` gives
+   * it, this is a read — a host polling it once a frame for an overlay would turn one
+   * old artifact into sixty messages a second.
+   */
+  #engineMask(): number {
+    const Module = this.#module;
+    if (!Module || typeof Module.web_input_get_mask !== 'function') return 0;
+    return Module.web_input_get_mask() | 0;
   }
 
   // ---- Host-driven input ----
@@ -1163,24 +1244,11 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
   #swallowContextMenu = (event: Event): void => event.preventDefault();
   #onPointerDown = (): void => this.#focusCanvas();
   #onKeyDown = (event: KeyboardEvent): void => {
-    const code = event.code;
-    const key = event.key;
-    if (
-      code === 'ArrowUp' ||
-      code === 'ArrowDown' ||
-      code === 'ArrowLeft' ||
-      code === 'ArrowRight' ||
-      key === 'ArrowUp' ||
-      key === 'ArrowDown' ||
-      key === 'ArrowLeft' ||
-      key === 'ArrowRight' ||
-      code === 'Space' ||
-      key === ' ' ||
-      code === 'Tab' ||
-      key === 'Tab'
-    ) {
-      event.preventDefault();
-    }
+    // Only the browser's own default action is suppressed — the arrows and Space
+    // scroll the page, Tab walks the focus out of the canvas. The event is left to
+    // propagate: SDL's own handler sits on `window` in the bubble phase, so calling
+    // stopPropagation() here would be the engine's whole keyboard.
+    if (ENGINE_KEYS.has(event.code) || ENGINE_KEYS.has(event.key)) event.preventDefault();
   };
   #onResize = (): void => this.#fitPicture();
   #onFullscreenChange = (): void => {

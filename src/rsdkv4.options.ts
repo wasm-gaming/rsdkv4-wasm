@@ -185,9 +185,10 @@ export interface Rsdkv4InputDefaults {
 /**
  * The engine's own default bindings. See {@link Rsdkv4InputDefaults}.
  *
- * Primary directional controls use Arrow keys (`ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`).
- * The engine natively checks WASD keys (`KeyW`, `KeyS`, `KeyA`, `KeyD`) as alternative directional controls
- * to bypass physical keyboard matrix ghosting on membrane keyboards when multiple directional keys are held simultaneously.
+ * Directions are the arrow keys. This build's `ProcessInput()` also reads `KeyW`,
+ * `KeyA`, `KeyS` and `KeyD` as a second set of them, and takes those three scancodes
+ * off `x`, `y` and `z` to do it — so the table below is what a *claiming* host should
+ * bind, and the engine under SDL polling answers to both.
  *
  * This replaces the old `RSDKV4_KEYMAP`, which nothing read and which was wrong in
  * three ways for want of ever being checked against the engine: it listed 9 of the

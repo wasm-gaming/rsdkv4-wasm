@@ -109,6 +109,7 @@ const server = await devServer({
     },
     { pattern: 'src/craft/**', fn: mirror('src/craft', 'dist/craft') },
     { pattern: 'src/worker-smoke/**', fn: mirror('src/worker-smoke', 'dist/worker-smoke') },
+    { pattern: 'src/input-doctor/**', fn: mirror('src/input-doctor', 'dist/input-doctor') },
   ],
 })
 
@@ -116,3 +117,4 @@ console.log(`Serving dist/ at ${server.url} (Ctrl+C to stop)`)
 console.log('  /              API reference')
 console.log('  /craft/        craft demo')
 console.log('  /worker-smoke/ worker smoke test')
+console.log('  /input-doctor/ keyboard diagnostic')

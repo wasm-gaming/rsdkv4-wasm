@@ -38,7 +38,7 @@ SPECS := node_modules/@wasm-gaming/engine-specs
 SPECS_DEMO := $(SPECS)/demo
 
 .PHONY: build build-sdk build-lib build-specs build-wasm build-wasm-worker \
-	demo build-typedoc build-demo build-vanilla build-craft build-smoke \
+	demo build-typedoc build-demo build-vanilla build-craft build-smoke build-input-doctor \
 	up preview preview.single typecheck test release-check i install clean clean-all help
 
 i: install
@@ -65,7 +65,7 @@ build-specs: build-lib ## Copy the contract's runtime → dist/engine-specs.js
 	# map, and this is the file it points at.
 	cp $(SPECS)/dist/engine-specs.js dist/engine-specs.js
 
-demo: build-typedoc build-demo build-smoke ## The site: API reference + demo shell + hosts + smoke page
+demo: build-typedoc build-demo build-smoke build-input-doctor ## The site: API reference + demo shell + hosts + smoke page + input doctor
 
 build-demo: build-lib ## Compile demo → dist/demo.js; copy shared template (no root page — that is the API reference)
 	# This emit is also the demo's type check — `typecheck` covers the SDK only,
@@ -115,6 +115,14 @@ build-craft: ## Copy the no-build demo → dist/craft/ (served at /craft/)
 	rm -rf dist/craft
 	cp -R src/craft dist/craft
 
+build-input-doctor: ## Copy the keyboard diagnostic → dist/input-doctor/ (served at /input-doctor/)
+	# Plain HTML with an inline script and no imports, on purpose: it measures what
+	# the *browser* delivers, so it has to be able to run with the SDK, the wasm and
+	# the game data all missing or broken. The ESC menu in craft links to it, and the
+	# in-game half of the same diagnostic is the input probe next to that link.
+	rm -rf dist/input-doctor
+	cp -R src/input-doctor dist/input-doctor
+
 build-typedoc: node_modules ## API reference → dist/ root, i.e. the site's home page (config in typedoc.json)
 	# The reference *is* the site now: `out` is dist/ itself, so dist/index.html is
 	# the API home and the hosts hang off it at /craft/ and /worker-smoke/. CI
@@ -159,7 +167,7 @@ release-check: build-sdk test ## Preflight release checks (types/tests + npm pac
 # build-sdk first: craft resolves both `@wasm-gaming/rsdkv4-wasm` and
 # `@wasm-gaming/engine-specs` through its import map, and build-specs is what
 # puts the second one in dist/.
-UP_TARGETS := build-sdk build-typedoc build-craft build-smoke
+UP_TARGETS := build-sdk build-typedoc build-craft build-smoke build-input-doctor
 
 up: node_modules ## Dev loop: /=API reference, /craft/, /worker-smoke/ — rebuilt and reloaded on save
 	# One build up front so the first page load is not a 404, then jq79's dev

@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Input doctor — RSDKv4</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: #14161a;
+    color: #e6e8ec;
+    font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  main { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 24px; color: #9aa3af; max-width: 70ch; }
+  section { margin-bottom: 28px; }
+  h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+    color: #9aa3af; margin: 0 0 10px; font-weight: 600;
+  }
+  .keys { display: flex; flex-wrap: wrap; gap: 6px; }
+  .key {
+    padding: 6px 10px; border-radius: 6px; border: 1px solid #2b3038;
+    background: #1b1e24; color: #6b7280; min-width: 72px; text-align: center;
+  }
+  .key.down { background: #1d4ed8; border-color: #3b82f6; color: #fff; }
+  .combos { display: grid; gap: 6px; }
+  .combo {
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+    border-radius: 6px; border: 1px solid #2b3038; background: #1b1e24;
+  }
+  .combo .light { width: 10px; height: 10px; border-radius: 50%; background: #3f4650; flex: none; }
+  .combo.ok { border-color: #22c55e44; }
+  .combo.ok .light { background: #22c55e; }
+  .combo .name { flex: 1; }
+  .combo .verdict { color: #9aa3af; font-size: 12px; }
+  .combo.ok .verdict { color: #22c55e; }
+  .big { font-size: 32px; font-weight: 700; vertical-align: -4px; }
+  #log {
+    height: 220px; overflow: auto; background: #0f1115;
+    border: 1px solid #2b3038; border-radius: 6px; padding: 10px; font-size: 12px;
+  }
+  #log div { white-space: pre; }
+  .up { color: #9aa3af; }
+  .dn { color: #7dd3fc; }
+  .rp { color: #4b5563; }
+  button {
+    font: inherit; padding: 6px 12px; border-radius: 6px;
+    border: 1px solid #2b3038; background: #1b1e24; color: #e6e8ec; cursor: pointer;
+  }
+  button:hover { background: #262b33; }
+  .note { color: #9aa3af; font-size: 12px; margin-top: 10px; max-width: 70ch; }
+  a { color: #7dd3fc; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Input doctor</h1>
+<p class="sub">
+  Mide lo que <b>el navegador</b> entrega, antes de SDL y antes del motor. Es la
+  mitad de arriba del diagnóstico: si una combinación no se pone en verde aquí, la
+  tecla no llega ni a la página y el problema es el teclado (ghosting de matriz),
+  no el código. Si todas se ponen en verde, el navegador está bien y hay que mirar
+  el otro lado — la <b>sonda de input</b> del menú ESC de
+  <a href="../craft/">craft</a>, que enseña lo que el motor tiene retenido.
+</p>
+
+<section>
+  <h2>Teclas mantenidas ahora</h2>
+  <div class="keys" id="keys"></div>
+  <p class="note">Máximo simultáneas visto: <span class="big" id="max">0</span></p>
+</section>
+
+<section>
+  <h2>Combinaciones de juego</h2>
+  <div class="combos" id="combos"></div>
+  <p class="note">
+    Mantén las teclas de cada fila a la vez. Verde = el navegador las vio juntas.
+    Una fila que se resiste con las demás en verde es ghosting de esa terna
+    concreta, y se arregla cambiando de teclas, no de código.
+  </p>
+  <p><button id="reset">Reiniciar</button></p>
+</section>
+
+<section>
+  <h2>Eventos en bruto</h2>
+  <div id="log"></div>
+  <p class="note">↓ pulsación, ↻ repetición automática del navegador, ↑ suelta.</p>
+</section>
+
+</main>
+
+<script>
+  // Teclas que el motor lee: las flechas y WASD como direcciones, ZXC como los
+  // botones A/B/C, Enter = start, Tab = select. ShiftLeft está sólo como control:
+  // no la usa el juego, y sirve para ver que la página responde.
+  const WATCH = [
+    'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+    'KeyW', 'KeyA', 'KeyS', 'KeyD',
+    'KeyZ', 'KeyX', 'KeyC', 'Enter', 'Space', 'Tab', 'ShiftLeft',
+  ];
+
+  // Las ternas que importan son dirección + abajo + salto: es lo que se pulsa a la
+  // vez para rodar y para cargar un spindash, y donde se notaría un ghosting real.
+  const COMBOS = [
+    ['ArrowLeft', 'ArrowDown'],
+    ['ArrowRight', 'ArrowDown'],
+    ['ArrowLeft', 'ArrowDown', 'KeyZ'],
+    ['ArrowRight', 'ArrowDown', 'KeyZ'],
+    ['ArrowLeft', 'ArrowDown', 'KeyX'],
+    ['ArrowRight', 'ArrowDown', 'KeyX'],
+    ['ArrowUp', 'ArrowLeft'],
+    ['ArrowUp', 'ArrowRight'],
+    ['ArrowDown', 'KeyZ'],
+    ['KeyA', 'KeyS'],
+    ['KeyD', 'KeyS'],
+    ['KeyA', 'KeyS', 'KeyZ'],
+    ['KeyD', 'KeyS', 'KeyZ'],
+  ];
+
+  const label = (code) => code.replace(/^(Key|Arrow)/, '');
+
+  const held = new Set();
+  let maxHeld = 0;
+
+  const keysEl = document.getElementById('keys');
+  const combosEl = document.getElementById('combos');
+  const logEl = document.getElementById('log');
+  const maxEl = document.getElementById('max');
+
+  const keyNodes = new Map();
+  for (const code of WATCH) {
+    const el = document.createElement('div');
+    el.className = 'key';
+    el.textContent = label(code);
+    keysEl.appendChild(el);
+    keyNodes.set(code, el);
+  }
+
+  const comboNodes = COMBOS.map((codes) => {
+    const el = document.createElement('div');
+    el.className = 'combo';
+    el.innerHTML =
+      '<span class="light"></span>' +
+      '<span class="name">' + codes.map(label).join(' + ') + '</span>' +
+      '<span class="verdict">sin probar</span>';
+    combosEl.appendChild(el);
+    return { codes, el, ok: false };
+  });
+
+  function render() {
+    for (const [code, el] of keyNodes) el.classList.toggle('down', held.has(code));
+    maxEl.textContent = String(maxHeld);
+    for (const combo of comboNodes) {
+      if (combo.ok || !combo.codes.every((code) => held.has(code))) continue;
+      combo.ok = true;
+      combo.el.classList.add('ok');
+      combo.el.querySelector('.verdict').textContent = 'OK';
+    }
+  }
+
+  function log(kind, event) {
+    const line = document.createElement('div');
+    line.className = kind === 'keydown' ? (event.repeat ? 'rp' : 'dn') : 'up';
+    line.textContent =
+      String(Math.round(performance.now())).padStart(7) + '  ' +
+      (kind === 'keydown' ? (event.repeat ? '↻' : '↓') : '↑') + '  ' +
+      event.code.padEnd(12) + ' key=' + JSON.stringify(event.key) +
+      '  held=' + held.size;
+    logEl.appendChild(line);
+    while (logEl.childElementCount > 400) logEl.removeChild(logEl.firstChild);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  addEventListener('keydown', (event) => {
+    // Sin esto las flechas hacen scroll y Tab se lleva el foco fuera, que es
+    // justo lo que rompe una prueba de teclas mantenidas.
+    event.preventDefault();
+    held.add(event.code);
+    if (held.size > maxHeld) maxHeld = held.size;
+    render();
+    log('keydown', event);
+  });
+
+  addEventListener('keyup', (event) => {
+    event.preventDefault();
+    held.delete(event.code);
+    render();
+    log('keyup', event);
+  });
+
+  // El navegador deja de mandar keyup en cuanto la página pierde el foco, así que
+  // sin esto quedarían teclas pegadas y el máximo saldría inflado.
+  addEventListener('blur', () => { held.clear(); render(); });
+
+  document.getElementById('reset').onclick = () => {
+    maxHeld = 0;
+    for (const combo of comboNodes) {
+      combo.ok = false;
+      combo.el.classList.remove('ok');
+      combo.el.querySelector('.verdict').textContent = 'sin probar';
+    }
+    logEl.textContent = '';
+    render();
+  };
+
+  render();
+</script>
+</body>
+</html>
