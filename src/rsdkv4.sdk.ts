@@ -1434,7 +1434,7 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
 export class Rsdkv4SDK extends EngineSDKBase<Rsdkv4Payloads> {
   static readonly id = 'rsdkv4';
   /** Kept in step with package.json by `node scripts/sync-version.mjs`. */
-  static readonly version = '0.2.0';
+  static readonly version = '0.2.1';
   static readonly name = 'Retro Software Development Kit v4';
   static readonly description =
     'RSDKv4 compiled to WebAssembly via Emscripten. One game-agnostic WASM binary runs both Sonic 1 and Sonic 2 — the difference is only which Data.rsdk the host supplies at runtime. Ships none of the game: the player provides their own Data.rsdk, and it never leaves their browser.';
