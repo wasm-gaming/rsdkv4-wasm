@@ -14,6 +14,112 @@ import Rsdkv4SDK from '@wasm-gaming/rsdkv4-wasm';   // ya mapeado en el importma
 //   play.game.start(slot, player)             // slot 0-3, o null = NO SAVE
 
 
+/**
+ * Las zonas de cada juego, en el orden en que las lista su propio Data.rsdk
+ * (`Data/Game/GameConfig.bin`, categoría 1 — las escenas regulares).
+ *
+ * `scene` es el índice de la PRIMERA escena de la zona, porque eso es lo que guarda
+ * el slot en +4: el save apunta a un acto, no a una zona. Green Hill 2 es la escena
+ * 1, Scrap Brain 3 la 17. Y no vale leer la carpeta del pack para deducir la zona:
+ * Scrap Brain 3 vive en `Zone04` (reusa el tileset de Labyrinth) y Final Zone en
+ * `Zone06`. Por eso el número de zona se deriva de esta lista y no del pack.
+ *
+ * Volcado del propio pack con `.tmp/scripts/dump-stagelist.py`; vale mientras el
+ * Data.rsdk sea el que verifica el `checksum` de cada juego ahí abajo.
+ *
+ * `art` es hasta qué zona hay retrato en `assets/stages-<juego>/`: Sonic 2 tiene doce
+ * zonas y diez imágenes, así que Death Egg e Hidden Palace se quedan sin foto.
+ */
+export const STAGES = {
+  Sonic1: {
+    folder: 'stages-sonic1',
+    scenes: 19,
+    art: 7,
+    zones: [
+      { name: 'GREEN HILL ZONE', scene: 0 },
+      { name: 'MARBLE ZONE', scene: 3 },
+      { name: 'SPRING YARD ZONE', scene: 6 },
+      { name: 'LABYRINTH ZONE', scene: 9 },
+      { name: 'STARLIGHT ZONE', scene: 12 },
+      { name: 'SCRAP BRAIN ZONE', scene: 15 },
+      { name: 'FINAL ZONE', scene: 18 },
+    ],
+  },
+  Sonic2: {
+    folder: 'stages-sonic2',
+    scenes: 21,
+    art: 10,
+    zones: [
+      { name: 'EMERALD HILL ZONE', scene: 0 },
+      { name: 'CHEMICAL PLANT ZONE', scene: 2 },
+      { name: 'AQUATIC RUIN ZONE', scene: 4 },
+      { name: 'CASINO NIGHT ZONE', scene: 6 },
+      { name: 'HILL TOP ZONE', scene: 8 },
+      { name: 'MYSTIC CAVE ZONE', scene: 10 },
+      { name: 'OIL OCEAN ZONE', scene: 12 },
+      { name: 'METROPOLIS ZONE', scene: 14 },
+      { name: 'SKY CHASE ZONE', scene: 17 },
+      { name: 'WING FORTRESS ZONE', scene: 18 },
+      { name: 'DEATH EGG ZONE', scene: 19 },
+      { name: 'HIDDEN PALACE ZONE', scene: 20 },
+    ],
+  },
+}
+
+/**
+ * Cuántas esmeraldas enseñar de las siete.
+ *
+ * RSDKv4 guarda un contador, no una máscara: el save dice CUÁNTAS se llevan, nunca
+ * cuáles, así que se encienden las primeras. Un valor fuera de rango se cuenta por
+ * bits antes que pintar cuatro mil millones de gemas — misma lectura que hace
+ * `src/demo/start-screens.ts`.
+ */
+export const emeraldCount = (value) => {
+  if (value >= 0 && value <= 7) return value
+  let bits = 0
+  for (let v = value; v > 0; v >>= 1) bits += v & 1
+  return Math.min(bits, 7)
+}
+
+/**
+ * Qué enseñar de un slot: nombre de zona, número, acto y retrato.
+ *
+ * Devuelve null para un slot vacío, que es lo que la tarjeta ya distingue.
+ */
+export const describeSlot = (slot, gameId) => {
+  if (!slot || slot.empty) return null
+
+  const pack = STAGES[gameId] ?? STAGES.Sonic1
+
+  // Las special stages son su propia categoría (cat 3), con su numeración.
+  if (slot.list === 3) {
+    return {
+      name: 'SPECIAL STAGE',
+      tag: `STAGE ${slot.zone + 1}`,
+      zone: null,
+      act: slot.zone + 1,
+      img: `./assets/${pack.folder}/special.png`,
+    }
+  }
+
+  // Fuera de la lista regular sólo queda el STAGE MENU del pack: no es una zona y no
+  // hay nada honesto que pintar.
+  if (slot.zone < 0 || slot.zone >= pack.scenes) {
+    return { name: 'UNKNOWN ZONE', tag: '', zone: null, act: null, img: '' }
+  }
+
+  const index = pack.zones.findLastIndex(({ scene }) => slot.zone >= scene)
+  const zone = pack.zones[index]
+
+  return {
+    name: zone.name,
+    tag: `ZONE ${index + 1}`,
+    zone: index + 1,
+    act: slot.zone - zone.scene + 1,
+    img: index < pack.art ? `./assets/${pack.folder}/zone-${index + 1}.png` : '',
+  }
+}
+
 export const gameService = $reactive({
   selectedGame: null,
   isRunning: false,
