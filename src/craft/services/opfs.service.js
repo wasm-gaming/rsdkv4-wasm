@@ -51,6 +51,15 @@ const fileAt = async (path, create = false) => {
 
 export const opfsService = {
     filesInOPFS: [],
+    /**
+     * Vuelca el árbol OPFS entero a la consola y lo devuelve como datos.
+     *
+     * Existe porque `readFilesInOPFS()` sólo ve los ficheros *sueltos* de un
+     * directorio, y en la raíz de la librería no hay ninguno: todo cuelga de
+     * rsdkv4/<juego>/. Preguntarle a la raíz devolvía [] siempre, que se lee como
+     * "no hay nada guardado" cuando puede haber 40 MB de pack y una partida.
+     */
+    logTree: async () => opfsTree(),
     /** Files directly inside `rsdkv4/<path>`; the library root when omitted. */
     readFilesInOPFS: async (path = '') => {
         let dirHandle;

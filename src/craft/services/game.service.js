@@ -45,24 +45,59 @@ export const gameService = $reactive({
   },
 
   async init() {
-    console.log('Files at OPFS root:', await opfsService.readFilesInOPFS());
+    // El árbol entero, no `readFilesInOPFS()`: ésa sólo devuelve los ficheros
+    // *sueltos* en la raíz de la librería, y ahí no hay ninguno — todo cuelga de
+    // rsdkv4/<juego>/. Listaba [] siempre, que es peor que no listar nada.
+    await opfsService.logTree();
 
     for (const game of Object.values(this.games)) {
-      console.log(`Attempting to load Data.rsdk and save file for ${game.id}...`);
       try {
-        const file = await opfsService.readFileFromOPFS(`${game.id}/Data.rsdk`);
+        await opfsService.readFileFromOPFS(`${game.id}/Data.rsdk`);
         game.loaded = true;
-        // console.log(`Loaded Data.rsdk for ${game.name}`);
-      } catch (error) {
-        // console.warn(`Failed to load Data.rsdk for ${game.name}:`, error);
+      } catch {
+        game.loaded = false;
       }
-      try {
-        const file = await opfsService.readFileFromOPFS(`${game.id}/${game.saveFileName}`);
-        game.savegame = await this.parseSaveFile(file);
-      } catch (error) {
-        console.warn(`Failed to load save file for ${game.name}:`, error);
-      }
+      await this.refreshSaves(game);
     }
+  },
+
+  /**
+   * Relee las partidas guardadas de un juego.
+   *
+   * Dos fuentes, y el orden importa. Con el motor vivo manda `play.game.saveSlots()`:
+   * lee el saveRAM que el motor tiene en memoria, que es lo que el jugador acaba de
+   * cambiar, y lo parsea el propio motor (WebGame.cpp) en vez de esta copia a mano.
+   * Sin motor sólo queda el fichero que el SDK espejea en OPFS, que es el arranque en
+   * frío.
+   *
+   * `savegame` queda en null cuando no hay nada que enseñar, y eso es distinto de un
+   * array de cuatro slots vacíos: el primero es "aún no sé", el segundo es "sé que no
+   * hay partidas".
+   */
+  async refreshSaves(game) {
+    if (this.play && this.playingGameId === game.id) {
+      game.savegame = this.play.game.saveSlots();
+      return game.savegame;
+    }
+
+    let file;
+    try {
+      file = await opfsService.readFileFromOPFS(`${game.id}/${game.saveFileName}`);
+    } catch {
+      // Todavía no se ha jugado a este juego en este navegador. No es un error.
+      game.savegame = null;
+      return null;
+    }
+
+    try {
+      game.savegame = await this.parseSaveFile(file);
+    } catch (error) {
+      // Un SData.bin truncado o de otra cosa. Vale la pena gritarlo: se ve igual
+      // que "no hay partidas" y no es lo mismo en absoluto.
+      console.warn(`[craft] ${game.id}/${game.saveFileName} (${file.size} B) no se pudo parsear:`, error);
+      game.savegame = null;
+    }
+    return game.savegame;
   },
 
   selectGame(gameId) {
@@ -81,7 +116,15 @@ export const gameService = $reactive({
   // +4 zone    (0 = slot vacío; 1-based; >127 = special stage)
   // +5 emeralds  +6 specialPos
   async parseSaveFile(saveFile) {
-    const ram = new Int32Array(await saveFile.arrayBuffer())
+    const buffer = await saveFile.arrayBuffer()
+    // El motor escribe saveRAM entero: 0x2000 ints, 32768 bytes (Userdata.hpp).
+    // Comprobado antes de mirarlo porque `new Int32Array(buf)` con un tamaño que no
+    // es múltiplo de 4 lanza, y cuatro slots son 32 ints: menos que eso no es un
+    // SData.bin, es otra cosa con el mismo nombre.
+    if (buffer.byteLength % 4 || buffer.byteLength < 128) {
+      throw new RangeError(`${buffer.byteLength} bytes no es un SData.bin`)
+    }
+    const ram = new Int32Array(buffer)
     return Array.from({ length: 4 }, (_, slot) => {
         const base = slot << 3
         const zone = ram[base + 4]
@@ -164,9 +207,18 @@ export const gameService = $reactive({
         .storage({ namespace: `rsdkv4/${gameId}` })   // mismo layout OPFS que opfs.service.js (LIBRARY_DIR)
         .config({ startMenu: 'host' })                // antes: options.skipStartMenu
         .on('error', ({ detail }) => console.error('[rsdkv4]', detail))
+        // El motor guarda a su ritmo (partida nueva, checkpoint, fin de acto) y el
+        // SDK espejea SData.bin a OPFS y avisa cuando los bytes cambian. Sin esto
+        // las tarjetas se quedaban con lo que hubiera al cargar la página: jugabas,
+        // volvías, y seguían diciendo lo mismo que antes de jugar.
+        .on('saves', ({ detail }) => { this.games[gameId].savegame = detail })
         .start()
 
       this.playingGameId = gameId
+
+      // El motor ya tiene el saveRAM cargado: es más fresco y más fiable que el
+      // fichero, y deja las tarjetas correctas para cuando se vuelva al launcher.
+      await this.refreshSaves(this.games[gameId])
     }
 
     // La forma por índice, que es la que tiene esta UI. `start({ player })` del

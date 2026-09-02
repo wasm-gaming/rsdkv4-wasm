@@ -1,60 +1,134 @@
 
 <script :setup>
   let isDragOver = false;
+  let dragCounter = 0;
 
-  const on = {
-    dragenter: (event) => { isDragOver = true },
-    dragover: (event) => {
-        if (isDragOver) return
-        isDragOver = true;
-    },
-    dragleave: (event) => {
-      // dragleave also fires when the cursor crosses onto a child (the <input>
-      // covering the form, the <p>); only the one that leaves the form counts
-      if (event.currentTarget.contains(event.relatedTarget)) return
-      isDragOver = false
-    },
-    drop: (event) => {
+  const handleDragEnter = (event) => {
+    if (event.dataTransfer?.types?.includes('Files')) {
+      dragCounter++;
+      isDragOver = true;
+    }
+  };
+
+  const handleDragOver = (event) => {
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+    isDragOver = true;
+  };
+
+  const handleDragLeave = (event) => {
+    dragCounter--;
+    if (dragCounter <= 0) {
+      dragCounter = 0;
       isDragOver = false;
+    }
+  };
+
+  const handleDrop = (event) => {
+    event.preventDefault();
+    dragCounter = 0;
+    isDragOver = false;
+    if (event.dataTransfer?.files?.length) {
       $emit('files', event.dataTransfer.files);
-    },
-    submit: (files) => { $emit('files', files) },
-  }
+    }
+  };
+
+  const onFileInputChange = (event) => {
+    isDragOver = false;
+    if (event.target.files?.length) {
+      $emit('files', event.target.files);
+    }
+  };
+
+  window.addEventListener('dragenter', handleDragEnter);
+  window.addEventListener('dragover', handleDragOver);
+  window.addEventListener('dragleave', handleDragLeave);
+  window.addEventListener('drop', handleDrop);
 </script>
 
-<form
-  :class="{ 'drag-over': isDragOver }"
-  @submit.prevent="on.submit($event.target.elements.files.files)"
-  @dragenter.prevent="on.dragenter"
-  @dragover.prevent="on.dragover"
-  @dragleave.prevent="on.dragleave"
-  @drop.prevent="on.drop"
+<div
+  drop-overlay
+  :class="{ active: isDragOver }"
+  @dragenter.prevent="handleDragEnter"
+  @dragover.prevent="handleDragOver"
+  @dragleave.prevent="handleDragLeave"
+  @drop.prevent="handleDrop"
 >
-  <input type="file" name="files" multiple @change="on.submit($event.target.files)" />
-  <p>{{
-      isDragOver ? 'Drop files here' : 'Drag and drop files here'
-  }}</p>
-</form>
+  <input type="file" name="files" multiple @change="onFileInputChange" />
+  <div drop-box>
+    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    <h3>Drop files here</h3>
+    <p>Upload Data.rsdk or save files (SData.bin)</p>
+  </div>
+</div>
 
 <style scoped>
-  form {
+  [drop-overlay] {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(10, 15, 30, 0.85);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease-in-out;
+
+    &.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
+
+  [drop-box] {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    height: 100%;
-    position: relative;
-    border: 2px dashed #ccc;
-    border-radius: 10px;
+    gap: 1rem;
+    padding: 3rem 4rem;
+    border: 3px dashed #3b82f6;
+    border-radius: 1rem;
+    background: rgba(30, 41, 59, 0.9);
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 0 30px rgba(59, 130, 246, 0.3);
+    text-align: center;
+    color: white;
+    pointer-events: none;
+    transform: scale(0.95);
+    transition: transform 0.2s ease-in-out;
 
-    &:hover, &.drag-over {
-      border-color: #999;
+    [drop-overlay].active & {
+      transform: scale(1);
     }
 
-    &:active, &.drag-over {
-      border-color: #666;
+    svg {
+      color: #60a5fa;
+      animation: bounce 1.5s infinite;
+    }
+
+    h3 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin: 0;
+      color: #f8fafc;
+    }
+
+    p {
+      font-size: 0.95rem;
+      margin: 0;
+      color: #94a3b8;
     }
   }
+
   input[type="file"] {
     appearance: none;
     opacity: 0;
@@ -63,5 +137,15 @@
     width: 100%;
     height: 100%;
     cursor: pointer;
+    z-index: 2;
+  }
+
+  @keyframes bounce {
+    0%, 100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-8px);
+    }
   }
 </style>

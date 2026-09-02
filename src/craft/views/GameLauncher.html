@@ -1,24 +1,35 @@
 
 <script :setup>
-    const { gameService: { selectedGame } } = await import('../services/game.service.js');
+    const { gameService } = await import('../services/game.service.js');
 
     const players = [
         'sonic',
         'tails',
         'knuckles',
         'sonictails',
-    ]
-    let selectedPlayer = [0, 1, 2, 3]
+    ];
+    let selectedPlayer = [0, 1, 2, 3];
 
     const nextPlayer = (i) => {
-        const nextPlayer = selectedPlayer[i] + 1
+        const nextPlayerIndex = selectedPlayer[i] + 1;
 
-        selectedPlayer[i] = players[nextPlayer]
-            ? nextPlayer
-            : 0
-    }
+        selectedPlayer[i] = players[nextPlayerIndex]
+            ? nextPlayerIndex
+            : 0;
+    };
 
-    console.log('selectedGame', selectedGame)
+    const getSaveSlot = (i) => {
+        const savegame = gameService.selectedGame?.savegame;
+        if (!savegame || !savegame[i] || savegame[i].empty) return null;
+        return savegame[i];
+    };
+
+    const getStageImg = (slotData) => {
+        if (!slotData) return '';
+        const gameFolder = gameService.selectedGame?.id === 'Sonic2' ? 'stages-sonic2' : 'stages-sonic1';
+        const filename = slotData.list === 3 ? 'special.png' : `zone-${slotData.zone + 1}.png`;
+        return `./assets/${gameFolder}/${filename}`;
+    };
 </script>
 
 <section game-launcher>
@@ -37,15 +48,41 @@
         <!-- `i` es el índice 0-based del :each, y RSDKv4 numera sus cuatro slots
              0-3 — que es justo lo que espera game.start(slot, player). -->
         <div :each="slotNum, i in [1, 2, 3, 4]" slot-card in-memory>
-            <button type="button" player-choose @click="nextPlayer(i)" :player="players[selectedPlayer[i]]">
-                <img :src="`./assets/player-${players[selectedPlayer[i]]}.svg`" />
-            </button>
-            <button type="button" play @click="$emit('launch', {
-                slot: i,
-                player: selectedPlayer[i],
-            })">
-                PLAY
-            </button>
+            <div :if="getSaveSlot(i)" slot-info>
+                <div stage-badge>
+                    <img :src="getStageImg(getSaveSlot(i))" alt="Stage preview" />
+                </div>
+                <div slot-header>
+                    <div zone-title>
+                        {{ getSaveSlot(i).list === 3 ? `SPECIAL ${getSaveSlot(i).zone + 1}` : `ZONE ${getSaveSlot(i).zone + 1}` }}
+                    </div>
+                    <div player-icon :player="players[getSaveSlot(i).character] || 'sonic'">
+                        <img :src="`./assets/player-${players[getSaveSlot(i).character] || 'sonic'}.svg`" />
+                    </div>
+                </div>
+                <div stats-grid>
+                    <span stat-item title="Lives">❤️ {{ getSaveSlot(i).lives }}</span>
+                    <span stat-item title="Emeralds">💎 {{ getSaveSlot(i).emeralds }}</span>
+                    <span stat-item title="Score">⭐ {{ getSaveSlot(i).score }}</span>
+                </div>
+                <button type="button" play @click="$emit('launch', {
+                    slot: i,
+                    player: getSaveSlot(i).character,
+                })">
+                    CONTINUE
+                </button>
+            </div>
+            <div :else slot-new>
+                <button type="button" player-choose @click="nextPlayer(i)" :player="players[selectedPlayer[i]]">
+                    <img :src="`./assets/player-${players[selectedPlayer[i]]}.svg`" />
+                </button>
+                <button type="button" play @click="$emit('launch', {
+                    slot: i,
+                    player: selectedPlayer[i],
+                })">
+                    PLAY
+                </button>
+            </div>
         </div>
     </div>
 </section>
@@ -117,8 +154,86 @@
     [slot-card][in-memory] {
         display: flex;
         flex-direction: column;
-        gap: 1rem;
         padding: .75rem;
+        box-sizing: border-box;
+
+        [slot-info], [slot-new] {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            height: 100%;
+            gap: 0.4rem;
+        }
+
+        [stage-badge] {
+            width: 100%;
+            height: 85px;
+            position: relative;
+            border-radius: 4px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+
+            img {
+                display: block;
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                filter: brightness(0.9);
+                image-rendering: pixelated;
+                image-rendering: crisp-edges;
+            }
+        }
+
+        [slot-header] {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            width: 100%;
+            padding: 0 0.1rem;
+
+            [zone-title] {
+                font-weight: 800;
+                font-size: 0.85rem;
+                color: #fbbf24;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+                text-align: left;
+                line-height: 1.1;
+            }
+
+            [player-icon] {
+                display: flex;
+                align-items: flex-end;
+                justify-content: flex-end;
+                flex-shrink: 0;
+
+                img {
+                    height: 28px;
+                    width: auto;
+                    filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.8));
+                }
+            }
+        }
+
+        [stats-grid] {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 0.25rem 0.4rem;
+            font-size: 0.72rem;
+            color: #e2e8f0;
+
+            [stat-item] {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.2rem;
+                background: rgba(0, 0, 0, 0.4);
+                padding: 0.15rem 0.35rem;
+                border-radius: 3px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+        }
 
         button[player-choose] {
             all: unset;
@@ -126,11 +241,14 @@
             width: 100%;
             padding: 1rem .5rem 0;
             cursor: pointer;
-            background: #ddd;
             background: white;
             aspect-ratio: 1 / 1;
             transition: padding .05s linear;
             position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
 
             &::before, &::after {
                 content: '';
@@ -144,13 +262,10 @@
                 background-color: white;
 
                 &::before {
-                    animation: player-bg 20s linear;
-                    animation-iteration-count: infinite;
+                    animation: player-bg 20s linear infinite;
                 }
                 &::after {
-                    animation: player-bg 30s linear;
-                    animation-direction: reverse;
-                    animation-iteration-count: infinite;
+                    animation: player-bg 30s linear reverse infinite;
                 }
             }
 
@@ -191,6 +306,8 @@
             color: white;
             font-weight: bold;
             height: 34px;
+            width: 100%;
+            border-radius: 4px;
             cursor: pointer;
             text-shadow: 0 0 2px black;
 

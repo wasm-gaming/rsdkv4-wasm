@@ -1081,8 +1081,24 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
 
     // The engine writes SData.bin at its own pace (new game, checkpoint, options
     // change), so copy it out on a slow timer as well as on the way down.
+    //
+    // The timer alone loses saves, and by a wide margin: `destroy()` is the only
+    // other flush, and a browser tab that is closed or reloaded never calls it. A
+    // player who finished an act and hit reload inside the next ten seconds had the
+    // save written by the engine, held in the wasm heap, and dropped on the floor —
+    // which reads as "my progress did not stick" and looks exactly like a save
+    // system that does not work.
+    //
+    // `visibilitychange` → hidden is the flush that actually fires: it covers the
+    // tab being switched away from, the window being minimised, the phone going to
+    // the home screen, and — unlike `beforeunload`, which browsers increasingly
+    // ignore — navigating away and closing. `pagehide` backs it up for the bfcache
+    // path. Cheap to over-fire: the mirror compares bytes and returns without
+    // touching OPFS when nothing moved.
     if (this.#mirrorSaves) {
       this.#saveTimer = setInterval(() => void this.#mirrorSaveData(), 10_000);
+      document.addEventListener('visibilitychange', this.#onVisibilityChange);
+      window.addEventListener('pagehide', this.#onPageHide);
     }
 
     return Module;
@@ -1241,6 +1257,17 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
 
   // ---- The render target ----
 
+  /**
+   * Flush the save when the page is being put away. See where these are registered
+   * for why the ten-second timer is not enough on its own.
+   */
+  #onVisibilityChange = (): void => {
+    if (document.visibilityState === 'hidden' && this.#mirrorSaves) void this.#mirrorSaveData();
+  };
+  #onPageHide = (): void => {
+    if (this.#mirrorSaves) void this.#mirrorSaveData();
+  };
+
   #swallowContextMenu = (event: Event): void => event.preventDefault();
   #onPointerDown = (): void => this.#focusCanvas();
   #onKeyDown = (event: KeyboardEvent): void => {
@@ -1307,6 +1334,8 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
       if (this.#ownsCanvas) canvas.remove();
     }
     document.removeEventListener('fullscreenchange', this.#onFullscreenChange);
+    document.removeEventListener('visibilitychange', this.#onVisibilityChange);
+    window.removeEventListener('pagehide', this.#onPageHide);
     window.removeEventListener('resize', this.#onResize);
     this.#boxObserver?.disconnect();
     this.#boxObserver = null;
