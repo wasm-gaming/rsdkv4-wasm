@@ -974,6 +974,132 @@ void web_devmenu_set_paused(bool paused)
     Engine.masterPaused = paused;
 }
 
+// --- the engine's own menu screens ------------------------------------------
+//
+// The packs draw their own stage pickers (Sonic 1 and 2 both carry a LEVEL SELECT
+// and a STAGE MENU scene, and web_devmenu_load_stage above is enough to reach
+// them), but neither lists the BONUS category — their menus end in
+// `stage.activeList = 1`. The engine's Dev Menu is the only native way in, so this
+// opens it, optionally straight at a given screen.
+//
+// The work is deliberately NOT done here: initDevMenu() clears graphics and
+// animation data and loads a GIF, and this function is called from the page. What
+// Escape does is set the game mode and let the engine thread run initDevMenu() on
+// its next frame (RetroEngine.cpp's SDLK_ESCAPE handler → ENGINE_INITDEVMENU →
+// RetroGameLoop.cpp), and this does exactly the same, leaving the screen it wants
+// as a note for web_devmenu_apply_pending() — which build.sh calls from that same
+// branch, right after initDevMenu().
+
+enum WebDevMenuScreen {
+    WEBDEVMENU_MAIN = 0,
+    WEBDEVMENU_PLAYERSEL,
+    WEBDEVMENU_STAGELISTSEL,
+    WEBDEVMENU_STAGESEL,
+};
+
+static int pendingDevMenuScreen = -1;
+static int pendingDevMenuList   = 0;
+static int pendingPlayerListPos = 0;
+
+namespace {
+// Where a stage list sits on the STAGELISTSEL screen. The engine's categories are
+// 0 presentation, 1 regular, 2 bonus, 3 special; the menu lists them in a different
+// order and addresses rows by the same selection2 the handler in Debug.cpp reads.
+int stageListSelection(int list)
+{
+    switch (list) {
+        case STAGELIST_PRESENTATION: return 3;
+        case STAGELIST_REGULAR: return 5;
+        case STAGELIST_SPECIAL: return 7;
+        case STAGELIST_BONUS: return 9;
+        default: return 3;
+    }
+}
+
+// …and which GameConfig list LoadConfigListText() wants for it, which is a third
+// numbering again: the file stores bonus and special the other way round. Same
+// mapping Debug.cpp computes as ((selection2 - 3) >> 1) + 1.
+int stageListConfigNo(int list) { return ((stageListSelection(list) - 3) >> 1) + 1; }
+} // namespace
+
+void web_devmenu_open(int screen, int listIdx)
+{
+    if (screen < WEBDEVMENU_MAIN || screen > WEBDEVMENU_STAGESEL)
+        return;
+    if (listIdx < 0 || listIdx >= STAGELIST_MAX)
+        listIdx = 0;
+
+    pendingDevMenuScreen = screen;
+    pendingDevMenuList   = listIdx;
+    // initDevMenu() resets playerListPos to 0. Warping from a Tails game would
+    // quietly continue as Sonic, so carry the current one across the reset — the
+    // player is chosen on its own screen, not by opening a stage list.
+    pendingPlayerListPos = playerListPos;
+
+    Engine.gameMode = ENGINE_INITDEVMENU;
+}
+
+// Called by RetroGameLoop.cpp immediately after initDevMenu(), on the engine
+// thread. Every branch mirrors the transition Debug.cpp performs when the player
+// walks there by hand, so a menu opened from HTML behaves like one opened with
+// Escape — including what B goes back to.
+void web_devmenu_apply_pending()
+{
+    if (pendingDevMenuScreen < 0)
+        return;
+
+    const int screen = pendingDevMenuScreen;
+    int list         = pendingDevMenuList;
+    pendingDevMenuScreen = -1;
+
+    playerListPos = pendingPlayerListPos;
+
+    if (screen == WEBDEVMENU_MAIN)
+        return; // initDevMenu() already left DEVMENU_MAIN up
+
+    if (screen == WEBDEVMENU_PLAYERSEL) {
+        // DEVMENU_MAIN's "STAGE SELECT" row, with the current player kept rather
+        // than reset — same as coming back with B from the stage list.
+        SetupTextMenu(&gameMenu[0], 0);
+        AddTextMenuEntry(&gameMenu[0], "SELECT A PLAYER");
+        SetupTextMenu(&gameMenu[1], 0);
+        LoadConfigListText(&gameMenu[1], 0);
+        gameMenu[0].alignment        = 2;
+        gameMenu[1].alignment        = 0;
+        gameMenu[1].selectionCount   = 1;
+        gameMenu[1].visibleRowCount  = 0;
+        gameMenu[1].visibleRowOffset = 0;
+        gameMenu[1].selection1       = playerListPos;
+        stageMode                    = DEVMENU_PLAYERSEL;
+        return;
+    }
+
+    // An empty list has nothing to select — the STAGELISTSEL handler refuses to
+    // advance into one (`stageListCount[list] > 0`), and Sonic 1's BONUS is empty.
+    // Stopping on the category screen says that better than an empty stage list.
+    if (screen == WEBDEVMENU_STAGESEL && stageListCount[list] <= 0)
+        list = STAGELIST_REGULAR;
+
+    setTextMenu(DEVMENU_STAGELISTSEL); // sets stageMode itself
+    gameMenu[0].selection2 = stageListSelection(list);
+    activeStageList        = list;
+
+    if (screen == WEBDEVMENU_STAGESEL && stageListCount[list] > 0) {
+        SetupTextMenu(&gameMenu[0], 0);
+        AddTextMenuEntry(&gameMenu[0], "SELECT A STAGE");
+        SetupTextMenu(&gameMenu[1], 0);
+        LoadConfigListText(&gameMenu[1], stageListConfigNo(list));
+        gameMenu[1].alignment      = 1;
+        gameMenu[1].selectionCount = 3;
+        gameMenu[1].selection1     = 0;
+        gameMenu[1].visibleRowCount = gameMenu[1].rowCount > 18 ? 18 : 0;
+        gameMenu[0].alignment      = 2;
+        gameMenu[0].selectionCount = 1;
+        gameMenu[1].timer          = 0;
+        stageMode                  = DEVMENU_STAGESEL;
+    }
+}
+
 // --- input latency ----------------------------------------------------------
 //
 // Recorded by the engine thread the moment it pulls a keydown off SDL's queue.
@@ -1044,6 +1170,7 @@ EMSCRIPTEN_BINDINGS(web_devmenu)
     emscripten::function("web_devmenu_get_stage_list", &web_devmenu_get_stage_list);
     emscripten::function("web_devmenu_load_stage", &web_devmenu_load_stage);
     emscripten::function("web_devmenu_set_paused", &web_devmenu_set_paused);
+    emscripten::function("web_devmenu_open", &web_devmenu_open);
     emscripten::function("web_frame_count", &web_frame_count);
     emscripten::function("web_engine_off_main_thread", &web_engine_off_main_thread);
     emscripten::function("web_last_key_ms", &web_last_key_ms);
@@ -1360,6 +1487,29 @@ with open(path, "r", encoding="utf-8") as f:
 anchor = "          RSDKv4/Userdata.cpp      \\\n"
 assert content.count(anchor) == 1, "expected exactly one Userdata.cpp SOURCES line"
 content = content.replace(anchor, anchor + "          RSDKv4/WebGame.cpp      \\\n", 1)
+
+with open(path, "w", encoding="utf-8") as f:
+    f.write(content)
+PYEOF
+
+echo "Patching RetroGameLoop.cpp to apply a dev-menu screen asked for from JS..."
+python3 - "$WORK_DIR/RSDKv4/RetroGameLoop.cpp" <<'PYEOF'
+import sys
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as f:
+    content = f.read()
+
+# web_devmenu_open() cannot build the screen itself: it is called from the page, and
+# initDevMenu() loads a GIF and clears graphics data. So it leaves a note and sets
+# ENGINE_INITDEVMENU — exactly what Escape does — and the note is cashed in here, on
+# the engine thread, in the one place that runs right after initDevMenu().
+anchor = "            initDevMenu();\n"
+assert content.count(anchor) == 1, "expected exactly one initDevMenu() call in RetroGameLoop.cpp"
+content = content.replace(anchor, anchor + "            web_devmenu_apply_pending();\n", 1)
+
+anchor = '#include "RetroEngine.hpp"'
+assert content.count(anchor) >= 1, "RetroGameLoop.cpp does not include its own header"
+content = content.replace(anchor, anchor + "\n\nvoid web_devmenu_apply_pending(); // WebDevMenu.cpp", 1)
 
 with open(path, "w", encoding="utf-8") as f:
     f.write(content)

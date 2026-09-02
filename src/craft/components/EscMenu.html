@@ -10,6 +10,13 @@
 
   let escOpen = false;
 
+  /**
+   * Las pantallas nativas que hay detrás de los botones, preguntadas al motor cada vez
+   * que se abre el menú y no una sola vez al montar: el pack cargado puede cambiar
+   * entre partidas, y con el motor apagado la lista viene vacía.
+   */
+  let screens = { pack: [], bonus: 0, canOpenDevMenu: false };
+
   const closeMenu = () => {
     if (!escOpen) return;
     escOpen = false;
@@ -23,9 +30,42 @@
     if (escOpen) return;
     escOpen = true;
     gameService.play?.pause(PAUSE_OWNER);
+    screens = gameService.nativeScreens();
   };
 
   const toggleProbe = () => inputProbe.toggle(gameService.play);
+
+  /**
+   * Una escena de menú del propio pack (LEVEL SELECT, STAGE MENU).
+   *
+   * Se cierra el overlay ANTES de cargar porque `loadStage` no despausa: con el motor
+   * parado la escena quedaría pedida y sin dibujar, y el jugador vería su partida
+   * congelada debajo de un menú que ya no está.
+   */
+  const goToPackScreen = ({ list, scene }) => {
+    closeMenu();
+    try {
+      gameService.play.devMenu.loadStage(list, scene);
+    } catch (error) {
+      console.warn('[craft] no se pudo cargar la pantalla del pack:', error);
+    }
+  };
+
+  /**
+   * El menú del propio motor (Debug.cpp), que es la única vía nativa a la lista BONUS.
+   *
+   * Mismo orden que arriba, y por el mismo motivo: `open()` deja la petición al hilo
+   * del motor, que la atiende en su siguiente frame — y no hay siguiente frame
+   * mientras el SDK tenga la pausa.
+   */
+  const goToDevMenu = (screen, category) => {
+    closeMenu();
+    try {
+      gameService.play.devMenu.open(screen, category);
+    } catch (error) {
+      console.warn('[craft] no se pudo abrir el menú del motor:', error);
+    }
+  };
 
   const onKeyDown = (event) => {
     if (event.key !== 'Escape' || !gameService.isRunning) return;
@@ -58,6 +98,32 @@
     <h2>Pausa</h2>
 
     <button type="button" @click="closeMenu()">Reanudar</button>
+
+    <!-- Las pantallas que dibuja el propio pack. Se cargan como cualquier otra
+         escena, así que volver de ellas es jugar: la partida sigue viva detrás. -->
+    <h3 :if="screens.pack.length">Pantallas del juego</h3>
+
+    <button :each="screen in screens.pack" type="button" @click="goToPackScreen(screen)">
+      {{ screen.label }}
+      <small>{{ screen.hint }}</small>
+    </button>
+
+    <!-- Y las del motor. Van aparte porque no son inocuas: initDevMenu() limpia
+         gráficos y animaciones, o sea que el stage en curso se pierde (las partidas
+         guardadas no). El botón de bonus sólo existe si el pack trae esa lista —
+         Sonic 1 la declara vacía. -->
+    <h3 :if="screens.canOpenDevMenu">Menú del motor</h3>
+
+    <button :if="screens.canOpenDevMenu" type="button" data-engine @click="goToDevMenu('categories', 1)">
+      Selección de stage
+      <small>listas del motor · se pierde la partida en curso</small>
+    </button>
+
+    <button :if="screens.canOpenDevMenu && screens.bonus" type="button" data-engine
+      @click="goToDevMenu('stages', 2)">
+      Bonus
+      <small>{{ screens.bonus }} escenas · se pierde la partida en curso</small>
+    </button>
 
     <button type="button" data-probe :on="inputProbe.active ? '' : null" @click="toggleProbe()">
       Sonda de input
@@ -109,6 +175,14 @@
       color: #9aa3af;
     }
 
+    h3 {
+      margin: .5rem 0 -.125rem;
+      font-size: .7rem;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: #6b7280;
+    }
+
     button, a {
       all: unset;
       box-sizing: border-box;
@@ -128,6 +202,17 @@
         display: block;
         font-weight: normal;
         color: #9aa3af;
+      }
+    }
+
+    /* Los del motor se marcan porque tiran el stage en curso: el aviso está en el
+       `small`, pero un botón que se lleva la partida por delante no debería parecerse
+       tanto a "Reanudar". */
+    button[data-engine] {
+      border-left: 3px solid #b45309;
+
+      small {
+        color: #d97706;
       }
     }
 

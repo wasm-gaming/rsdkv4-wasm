@@ -116,6 +116,7 @@ const ENGINE_BRIDGES = [
   'web_start_game',
   'web_audio_stop',
   'web_devmenu_get_stage_list',
+  'web_devmenu_open',
   'web_input_set_source',
 ] as const;
 
@@ -359,11 +360,49 @@ function engineBridgeComplete(Module: EmscriptenModule): boolean {
 
 // ---------------------------------------------------------------- this engine's own surface
 
+/**
+ * A screen of RSDKv4's own in-canvas Dev Menu (Debug.cpp), as {@link
+ * RsdkDevMenuBridge.open} names them.
+ *
+ * `'categories'` is the engine's `SELECT A STAGE LIST` — PRESENTATION / REGULAR /
+ * SPECIAL / BONUS — and `'stages'` the scene list under one of them. Those two are the
+ * only native way to reach the BONUS list: the packs' own menu scenes (Sonic 1 and 2's
+ * `LEVEL SELECT` and `STAGE MENU`) can load a regular stage and nothing else.
+ */
+export type RsdkDevMenuScreen = 'main' | 'player' | 'categories' | 'stages';
+
+/**
+ * The order `web_devmenu_open`'s first argument counts in — the index into this array
+ * is what crosses to C++, so it has to stay in step with WebDevMenu.cpp (written by
+ * scripts/build.sh). Names on this side, a number on the wire.
+ */
+const DEV_MENU_SCREENS: readonly RsdkDevMenuScreen[] = ['main', 'player', 'categories', 'stages'];
+
 /** RSDKv4-specific bridge for a host's debug/stage-select UI. */
 export interface RsdkDevMenuBridge {
   getStageList(): Array<{ name: string; stages: Array<{ name: string }> }>;
   loadStage(categoryIdx: number, stageIdx: number): void;
   setPaused(paused: boolean): void;
+  /**
+   * Whether the loaded wasm carries {@link open}. False means an engine built before
+   * the bridge existed — a host should hide the button rather than offer a dead one.
+   */
+  readonly canOpen: boolean;
+  /**
+   * Open the engine's own Dev Menu at `screen`, with `category` selecting the stage
+   * list for `'categories'` (preselected) and `'stages'` (listed). Categories are the
+   * engine's own indices, the ones {@link getStageList} is ordered by — 2 is BONUS.
+   *
+   * This is what Escape does natively: the request is handed to the engine thread
+   * (`ENGINE_INITDEVMENU`) and the menu comes up on its next frame, so **the running
+   * stage is torn down** — `initDevMenu()` clears graphics and animation data. Save
+   * files are untouched; the current run is not.
+   *
+   * The menu is driven by the engine's own input and does not run while the SDK holds
+   * a pause, so resume before calling. Returns false when the engine cannot be reached
+   * or the wasm predates the bridge ({@link canOpen}).
+   */
+  open(screen?: RsdkDevMenuScreen, category?: number): boolean;
 }
 
 /**
@@ -1009,6 +1048,24 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
       setPaused: (paused) => {
         if (paused) this.pause('host');
         else this.resume(this.#pauseOwner ?? 'host');
+      },
+      canOpen: typeof Module.web_devmenu_open === 'function',
+      open: (screen = 'main', category = 0) => {
+        if (typeof Module.web_devmenu_open !== 'function') {
+          console.warn(
+            '[rsdkv4] this rsdkv4.wasm has no web_devmenu_open — rebuild it (`make build-wasm`), or read devMenu.canOpen before offering the button',
+          );
+          return false;
+        }
+        const index = DEV_MENU_SCREENS.indexOf(screen);
+        if (index < 0) {
+          console.warn(
+            `[rsdkv4] "${screen}" is not a dev menu screen — one of ${DEV_MENU_SCREENS.join(', ')}`,
+          );
+          return false;
+        }
+        Module.web_devmenu_open(index, category | 0);
+        return true;
       },
     };
   }

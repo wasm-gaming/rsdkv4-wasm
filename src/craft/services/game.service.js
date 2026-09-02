@@ -36,13 +36,13 @@ export const STAGES = {
     scenes: 19,
     art: 7,
     zones: [
-      { name: 'GREEN HILL ZONE', scene: 0 },
-      { name: 'MARBLE ZONE', scene: 3 },
-      { name: 'SPRING YARD ZONE', scene: 6 },
-      { name: 'LABYRINTH ZONE', scene: 9 },
-      { name: 'STARLIGHT ZONE', scene: 12 },
-      { name: 'SCRAP BRAIN ZONE', scene: 15 },
-      { name: 'FINAL ZONE', scene: 18 },
+      { name: 'GREEN HILL', scene: 0 },
+      { name: 'MARBLE', scene: 3 },
+      { name: 'SPRING YARD', scene: 6 },
+      { name: 'LABYRINTH', scene: 9 },
+      { name: 'STARLIGHT', scene: 12 },
+      { name: 'SCRAP BRAIN', scene: 15 },
+      { name: 'FINAL', scene: 18 },
     ],
   },
   Sonic2: {
@@ -50,18 +50,18 @@ export const STAGES = {
     scenes: 21,
     art: 10,
     zones: [
-      { name: 'EMERALD HILL ZONE', scene: 0 },
-      { name: 'CHEMICAL PLANT ZONE', scene: 2 },
-      { name: 'AQUATIC RUIN ZONE', scene: 4 },
-      { name: 'CASINO NIGHT ZONE', scene: 6 },
-      { name: 'HILL TOP ZONE', scene: 8 },
-      { name: 'MYSTIC CAVE ZONE', scene: 10 },
-      { name: 'OIL OCEAN ZONE', scene: 12 },
-      { name: 'METROPOLIS ZONE', scene: 14 },
-      { name: 'SKY CHASE ZONE', scene: 17 },
-      { name: 'WING FORTRESS ZONE', scene: 18 },
-      { name: 'DEATH EGG ZONE', scene: 19 },
-      { name: 'HIDDEN PALACE ZONE', scene: 20 },
+      { name: 'EMERALD HILL', scene: 0 },
+      { name: 'CHEMICAL PLANT', scene: 2 },
+      { name: 'AQUATIC RUIN', scene: 4 },
+      { name: 'CASINO NIGHT', scene: 6 },
+      { name: 'HILL TOP', scene: 8 },
+      { name: 'MYSTIC CAVE', scene: 10 },
+      { name: 'OIL OCEAN', scene: 12 },
+      { name: 'METROPOLIS', scene: 14 },
+      { name: 'SKY CHASE', scene: 17 },
+      { name: 'WING FORTRESS', scene: 18 },
+      { name: 'DEATH EGG', scene: 19 },
+      { name: 'HIDDEN PALACE', scene: 20 },
     ],
   },
 }
@@ -119,6 +119,43 @@ export const describeSlot = (slot, gameId) => {
     img: index < pack.art ? `./assets/${pack.folder}/zone-${index + 1}.png` : '',
   }
 }
+
+/**
+ * Las pantallas de menú que dibuja el propio pack, y en qué lista vive cada una.
+ *
+ * Se buscan por NOMBRE en `devMenu.getStageList()` — la lista que el motor lee del
+ * `GameConfig.bin` cargado — y no por índice: hoy `LEVEL SELECT` es la escena 5 de la
+ * presentación en los dos juegos y `STAGE MENU` la última de las regulares (19 en
+ * Sonic 1, 21 en Sonic 2), pero eso es cosa de estos dos packs, no del motor. Si un
+ * pack no declara una, no sale su botón.
+ *
+ * `list` es la categoría del motor: 0 presentación, 1 regular, 2 bonus, 3 special.
+ */
+export const PACK_SCREENS = [
+  {
+    key: 'level-select',
+    list: 0,
+    match: 'LEVEL SELECT',
+    label: 'Level select',
+    hint: 'la lista clásica: zonas, special stage y sound test',
+  },
+  {
+    key: 'stage-menu',
+    list: 1,
+    match: 'STAGE MENU',
+    label: 'Stage menu',
+    hint: 'la rejilla de zonas de la versión móvil',
+  },
+]
+
+/**
+ * Las categorías del motor, en el orden en que las devuelve `getStageList()`.
+ *
+ * El dev menu nativo las ofrece en otro orden (PRESENTATION, REGULAR, SPECIAL, BONUS)
+ * y el fichero las guarda con bonus y special intercambiadas; aquí manda el índice del
+ * motor, que es el que toman `loadStage()` y `open()`.
+ */
+export const STAGE_LISTS = { presentation: 0, regular: 1, bonus: 2, special: 3 }
 
 export const gameService = $reactive({
   selectedGame: null,
@@ -204,6 +241,51 @@ export const gameService = $reactive({
       game.savegame = null;
     }
     return game.savegame;
+  },
+
+  /**
+   * Qué pantallas nativas se pueden abrir ahora mismo, preguntándoselo al motor vivo.
+   *
+   * Dos familias, y no son lo mismo. `pack` son escenas del propio juego: se cargan
+   * como cualquier otra (`devMenu.loadStage`) y el resto de la partida sigue en pie.
+   * `devMenu` es el menú del motor (Debug.cpp), la única vía nativa a la lista BONUS
+   * — y entrar ahí tira el stage en curso, porque `initDevMenu()` limpia gráficos y
+   * animaciones antes de dibujarse.
+   *
+   * Sin motor devuelve todo vacío en vez de lanzar: el menú ESC se pinta también
+   * cuando aún no hay nada corriendo.
+   */
+  nativeScreens() {
+    const empty = { pack: [], bonus: 0, canOpenDevMenu: false }
+    if (!this.play || !this.isRunning) return empty
+
+    let lists
+    try {
+      lists = this.play.devMenu.getStageList()
+    } catch (error) {
+      // `play.devMenu` lanza si el motor todavía no está arriba. No es un error: es
+      // "aún no", y el menú se pinta igual sin estos botones.
+      console.warn('[craft] no se pudo leer la lista de escenas del pack:', error)
+      return empty
+    }
+
+    const named = (list, name) => {
+      // Los nombres del pack vienen con relleno ('STAGE MENU  '), así que se comparan
+      // recortados — mismo criterio que usa `describeSlot` para el STAGE MENU.
+      const scenes = lists[list]?.stages ?? []
+      const scene = scenes.findIndex(({ name: found }) => found?.trim() === name)
+      return scene < 0 ? null : scene
+    }
+
+    return {
+      pack: PACK_SCREENS
+        .map((screen) => ({ ...screen, scene: named(screen.list, screen.match) }))
+        .filter(({ scene }) => scene !== null),
+      // Sonic 1 trae la categoría vacía: sin escenas no hay nada que seleccionar y el
+      // dev menu tampoco deja entrar (`stageListCount[list] > 0`).
+      bonus: lists[STAGE_LISTS.bonus]?.stages?.length ?? 0,
+      canOpenDevMenu: this.play.devMenu.canOpen === true,
+    }
   },
 
   selectGame(gameId) {
