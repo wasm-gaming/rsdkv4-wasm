@@ -185,6 +185,10 @@ export interface Rsdkv4InputDefaults {
 /**
  * The engine's own default bindings. See {@link Rsdkv4InputDefaults}.
  *
+ * Primary directional controls use Arrow keys (`ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`).
+ * The engine natively checks WASD keys (`KeyW`, `KeyS`, `KeyA`, `KeyD`) as alternative directional controls
+ * to bypass physical keyboard matrix ghosting on membrane keyboards when multiple directional keys are held simultaneously.
+ *
  * This replaces the old `RSDKV4_KEYMAP`, which nothing read and which was wrong in
  * three ways for want of ever being checked against the engine: it listed 9 of the
  * 14 buttons, and bound `select` to `ShiftLeft` where the engine's default is `Tab`.

@@ -602,6 +602,7 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
 
     canvas.addEventListener('contextmenu', this.#swallowContextMenu);
     canvas.addEventListener('pointerdown', this.#onPointerDown);
+    canvas.addEventListener('keydown', this.#onKeyDown);
     window.addEventListener('resize', this.#onResize);
     // Fullscreen transitions need a refit too.
     document.addEventListener('fullscreenchange', this.#onFullscreenChange);
@@ -1161,6 +1162,26 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
 
   #swallowContextMenu = (event: Event): void => event.preventDefault();
   #onPointerDown = (): void => this.#focusCanvas();
+  #onKeyDown = (event: KeyboardEvent): void => {
+    const code = event.code;
+    const key = event.key;
+    if (
+      code === 'ArrowUp' ||
+      code === 'ArrowDown' ||
+      code === 'ArrowLeft' ||
+      code === 'ArrowRight' ||
+      key === 'ArrowUp' ||
+      key === 'ArrowDown' ||
+      key === 'ArrowLeft' ||
+      key === 'ArrowRight' ||
+      code === 'Space' ||
+      key === ' ' ||
+      code === 'Tab' ||
+      key === 'Tab'
+    ) {
+      event.preventDefault();
+    }
+  };
   #onResize = (): void => this.#fitPicture();
   #onFullscreenChange = (): void => {
     this.#fitPicture();
@@ -1214,6 +1235,7 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
     if (canvas) {
       canvas.removeEventListener('contextmenu', this.#swallowContextMenu);
       canvas.removeEventListener('pointerdown', this.#onPointerDown);
+      canvas.removeEventListener('keydown', this.#onKeyDown);
       if (this.#ownsCanvas) canvas.remove();
     }
     document.removeEventListener('fullscreenchange', this.#onFullscreenChange);

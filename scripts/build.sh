@@ -74,8 +74,12 @@ echo "Setting up workspace..."
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR" "$DIST_DIR"
 
-echo "Cloning Sonic-Decompilation-WASM repository..."
-git clone --depth=1 https://github.com/mattConn/Sonic-Decompilation-WASM.git "$WORK_DIR"
+echo "Cloning or copying Sonic-Decompilation-WASM repository..."
+if [ -d "$ROOT_DIR/.tmp/test-clone" ]; then
+  cp -R "$ROOT_DIR/.tmp/test-clone/." "$WORK_DIR/"
+else
+  git clone --depth=1 https://github.com/mattConn/Sonic-Decompilation-WASM.git "$WORK_DIR"
+fi
 
 echo "Patching Makefile: runtime FS load (no --preload-file), WASMFS, modularized ES6 output..."
 # - Drop the game-data preload; bump memory/stack as before.
@@ -321,9 +325,6 @@ if [ "$NOAUDIO" = "1" ]; then
   grep -q "if (false && (audioDevice" "$WORK_DIR/RSDKv4/Audio.cpp" || { echo "audio patch did not apply"; exit 1; }
 fi
 
-echo "Patching Input.cpp to forcibly initialize controllers continuously with fallback mapping..."
-perl -0777 -pi -e 's/void ProcessInput\(\)\n\{/void ProcessInput()\n{\n#if RETRO_USING_SDL2\n    for (int i = 0; i < SDL_NumJoysticks(); ++i) {\n        if (!SDL_GameControllerFromInstanceID(i)) {\n            if (!SDL_IsGameController(i)) {\n                char mapping[1024];\n                SDL_JoystickGUID guid = SDL_JoystickGetDeviceGUID(i);\n                char guid_str[33];\n                SDL_JoystickGetGUIDString(guid, guid_str, sizeof(guid_str));\n                snprintf(mapping, sizeof(mapping), "%s,Web Gamepad,a:b0,b:b1,x:b2,y:b3,back:b8,start:b9,leftstick:b10,rightstick:b11,leftshoulder:b4,rightshoulder:b5,dpup:b12,dpdown:b13,dpleft:b14,dpright:b15,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:b6,righttrigger:b7,", guid_str);\n                SDL_GameControllerAddMapping(mapping);\n            }\n            controllerInit(i);\n        }\n    }\n#endif/g' "$WORK_DIR/RSDKv4/Input.cpp"
-
 echo "Adding WebInput.cpp (host-driven input, and the jump key that pauses)..."
 cat << 'EOF' > "$WORK_DIR/RSDKv4/WebInput.cpp"
 // The two things this build does to ProcessInput. They are independent — either
@@ -504,33 +505,94 @@ path = sys.argv[1]
 with open(path, "r", encoding="utf-8") as f:
     content = f.read()
 
-head = "void ProcessInput()\n{\n"
-assert content.count(head) == 1, "expected exactly one ProcessInput definition"
-content = content.replace(
-    head,
-    "// WebInput.cpp. Declared here rather than in a header: one file, one caller.\n"
-    "int web_input_take();       // 1 = the host wrote inputDevice; do not poll SDL\n"
-    "void web_input_fold_jump(); // B into A while a stage runs\n"
-    "\n"
-    + head
-    + "    // The `return` is load-bearing. Falling through would reach the inputType\n"
-    "    // autoswitch at the end of this function, which hands control back to SDL\n"
-    "    // the moment a real key or pad button is touched.\n"
-    "    if (web_input_take())\n"
-    "        return;\n"
-    "\n",
-    1,
-)
+helper = """// WebInput.cpp. Declared here rather than in a header: one file, one caller.
+int web_input_take();       // 1 = the host wrote inputDevice; do not poll SDL
+void web_input_fold_jump(); // B into A while a stage runs
 
-# …and the SDL paths get the fold on the way out. Anchored on the comment that
-# follows the function, because the `#endif }` above it is not unique on its own.
-tail = "#endif\n}\n#endif\n\n// Pretty much is this code in the original"
-assert content.count(tail) == 1, "the end of ProcessInput is not where this patch expects it"
-content = content.replace(
-    tail,
-    "#endif\n\n    web_input_fold_jump();\n}\n#endif\n\n// Pretty much is this code in the original",
-    1,
-)
+static inline bool isKeyHeld(int buttonIdx, const byte *keyState) {
+    if (keyState[inputDevice[buttonIdx].keyMappings]) return true;
+    switch (buttonIdx) {
+        case INPUT_UP:    return keyState[SDL_SCANCODE_W];
+        case INPUT_DOWN:  return keyState[SDL_SCANCODE_S];
+        case INPUT_LEFT:  return keyState[SDL_SCANCODE_A];
+        case INPUT_RIGHT: return keyState[SDL_SCANCODE_D];
+        default: return false;
+    }
+}
+"""
+
+new_process_input = """void ProcessInput()
+{
+    if (web_input_take())
+        return;
+
+#if RETRO_USING_SDL2
+    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+        int instance_id = SDL_JoystickGetDeviceInstanceID(i);
+        if (instance_id >= 0 && !SDL_GameControllerFromInstanceID(instance_id)) {
+            if (!SDL_IsGameController(i)) {
+                char mapping[1024];
+                SDL_JoystickGUID guid = SDL_JoystickGetDeviceGUID(i);
+                char guid_str[33];
+                SDL_JoystickGetGUIDString(guid, guid_str, sizeof(guid_str));
+                snprintf(mapping, sizeof(mapping), "%s,Web Gamepad,a:b0,b:b1,x:b2,y:b3,back:b8,start:b9,leftstick:b10,rightstick:b11,leftshoulder:b4,rightshoulder:b5,dpup:b12,dpdown:b13,dpleft:b14,dpright:b15,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:b6,righttrigger:b7,", guid_str);
+                SDL_GameControllerAddMapping(mapping);
+            }
+            controllerInit(i);
+        }
+    }
+
+    int length           = 0;
+    const byte *keyState = SDL_GetKeyboardState(&length);
+
+    bool anyHeld = false;
+    for (int i = 0; i < INPUT_ANY; i++) {
+        bool held = isKeyHeld(i, keyState) || getControllerButton(inputDevice[i].contMappings);
+        if (held) {
+            if (!inputDevice[i].hold) {
+                inputDevice[i].press = true;
+                inputDevice[i].hold  = true;
+            }
+            else {
+                inputDevice[i].press = false;
+            }
+            anyHeld = true;
+        }
+        else {
+            inputDevice[i].press = false;
+            inputDevice[i].hold  = false;
+        }
+    }
+
+    if (anyHeld) {
+        if (!inputDevice[INPUT_ANY].hold)
+            inputDevice[INPUT_ANY].setHeld();
+    }
+    else if (inputDevice[INPUT_ANY].hold) {
+        inputDevice[INPUT_ANY].setReleased();
+    }
+
+    if (inputDevice[INPUT_ANY].press || inputDevice[INPUT_ANY].hold || touches > 1) {
+        Engine.dimTimer = 0;
+    }
+    else if (Engine.dimTimer < Engine.dimLimit) {
+        ++Engine.dimTimer;
+    }
+#endif
+
+    web_input_fold_jump();
+}"""
+
+anchor_head = "void ProcessInput()\n{\n"
+anchor_tail = "#endif\n}\n#endif\n\n// Pretty much is this code in the original"
+
+assert anchor_head in content, "expected ProcessInput head"
+assert anchor_tail in content, "expected ProcessInput tail"
+
+part1 = content.split(anchor_head)[0]
+part2 = content.split(anchor_tail)[1]
+
+content = part1 + helper + "\n" + new_process_input + "\n#endif\n\n// Pretty much is this code in the original" + part2
 
 with open(path, "w", encoding="utf-8") as f:
     f.write(content)
