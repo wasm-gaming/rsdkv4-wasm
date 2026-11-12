@@ -1,7 +1,7 @@
 # SDK — ejemplos del contrato propuesto
 
 > **Esto no es la API publicada.** Es el contrato acordado en
-> [SESSIONS/2026-08-13_01h49.engine-specs-refinement.md](../SESSIONS/2026-08-13_01h49.engine-specs-refinement.md),
+> [RECORD/2026-08-13.engine-specs-refinement.completed.md](../RECORD/2026-08-13.engine-specs-refinement.completed.md),
 > todavía sin implementar. Para la API que existe hoy en `@wasm-gaming/rsdkv4-wasm@0.1.5`, ver
 > [SDK-examples.md](SDK-examples.md).
 

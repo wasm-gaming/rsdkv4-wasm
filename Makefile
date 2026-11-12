@@ -147,7 +147,7 @@ build-wasm: ## WASM via emscripten/emsdk (Docker) → dist/rsdkv4/rsdkv4.{js,was
 build-wasm-worker: ## Experimental pthread/OffscreenCanvas WASM → dist/rsdkv4-worker/
 	# Opt-in variant: main() on a pthread, picture on a transferred OffscreenCanvas.
 	# Lands beside the shipped build rather than replacing it, so worker-smoke can
-	# run the two against each other. See SESSIONS/ for what it is meant to answer.
+	# run the two against each other. See RECORD/ for what it is meant to answer.
 	RSDKV4_WORKER=1 bash scripts/build-docker.sh
 
 build-smoke: ## Copy the worker smoke test → dist/worker-smoke/ (served at /worker-smoke/)

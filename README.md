@@ -337,10 +337,10 @@ What this project is, and the constraints that shape it.
 - **Everything builds from the Makefile**, `package.json` has no scripts. `dist/` is both
   the npm artifact and the Pages site: demo at the root, `/craft`, `/vanilla`, and the API
   reference at `/api-docs`.
-- **Sessions are the record.** Specs and decisions live in [SESSIONS/](SESSIONS/), append-only.
+- **RECORD/ is the record.** Specs and decisions live in [RECORD/](RECORD/): `.WIP.md` append-only, `.completed.md` read-only.
 - **The reference engine.** The other wasm-gaming engines migrate to this layout, and the
   [play.germade](https://github.com/jgermade/play.germade) launcher consumes it first — see
-  [SESSIONS/2026-11-12_12h00.standalone-package-and-wasmfs-engine-namespace.session.md](SESSIONS/2026-11-12_12h00.standalone-package-and-wasmfs-engine-namespace.session.md).
+  [RECORD/2026-11-12.standalone-package-and-wasmfs-engine-namespace.WIP.md](RECORD/2026-11-12.standalone-package-and-wasmfs-engine-namespace.WIP.md).
 
 ## Todos
 
