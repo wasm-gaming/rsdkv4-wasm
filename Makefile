@@ -57,13 +57,15 @@ build-sdk: build-lib build-specs ## The published package: TypeScript → dist/r
 build-lib: node_modules ## Compile SDK + options → dist/rsdkv4/
 	$(BIN)/tsc -p tsconfig.json
 
-build-specs: build-lib ## Copy the contract's runtime → dist/engine-specs.js
-	# As of engine-specs 0.3.2 the contract is not types-only: the SDK extends
-	# EngineSDKBase/EnginePlayBase and imports EventEmitter, so the built
-	# rsdkv4.sdk.js carries a bare `@wasm-gaming/engine-specs` specifier. A
-	# bundler resolves it; a page served straight out of dist/ needs an import
-	# map, and this is the file it points at.
-	cp $(SPECS)/dist/engine-specs.js dist/engine-specs.js
+build-specs: build-lib ## Ship the contract's runtime inside the package → dist/rsdkv4/engine-specs.js
+	# The SDK extends EngineSDKBase/EnginePlayBase, so the contract is a runtime
+	# import. It goes *next to* the SDK (inside package.json `files`) and the
+	# emitted imports are rewritten to it, so the published package loads from a
+	# plain static server — no bundler, no import map. engine-specs stays a regular
+	# dependency for its types.
+	cp $(SPECS)/dist/engine-specs.js dist/rsdkv4/engine-specs.js
+	node scripts/localize-specs.mjs dist/rsdkv4
+	rm -f dist/engine-specs.js
 
 demo: build-typedoc build-demo build-smoke build-input-doctor ## The site: API reference + demo shell + hosts + smoke page + input doctor
 
@@ -104,7 +106,7 @@ build-vanilla: ## Copy the no-build demo → dist/vanilla/ (served at /vanilla/)
 	rm -rf dist/vanilla
 	cp -R src/vanilla dist/vanilla
 
-build-craft: ## Copy the no-build demo → dist/craft/ (served at /craft/)
+build-craft: node_modules ## Copy the no-build demo → dist/craft/ (served at /craft/)
 	# Plain JS + HTML, nothing to compile: it imports the built SDK through an
 	# import map, so a copy is the whole "build". Edit src/craft and reload.
 	#
@@ -114,6 +116,9 @@ build-craft: ## Copy the no-build demo → dist/craft/ (served at /craft/)
 	# burst containing a .js is a full page reload. See the note there.
 	rm -rf dist/craft
 	cp -R src/craft dist/craft
+	# jq79 from node_modules (pinned), resolved by craft's import map.
+	mkdir -p dist/craft/vendor
+	cp node_modules/jq79/dist/jq79.js node_modules/jq79/dist/jq79.js.map dist/craft/vendor/
 
 build-input-doctor: ## Copy the keyboard diagnostic → dist/input-doctor/ (served at /input-doctor/)
 	# Plain HTML with an inline script and no imports, on purpose: it measures what
@@ -155,7 +160,8 @@ typecheck: node_modules ## Type-check the SDK without emitting (clean checkout, 
 	# `make demo` type-checks the hosts.
 	$(BIN)/tsc -p tsconfig.json --noEmit
 
-test: typecheck ## Run the test suite (currently TypeScript checks)
+test: typecheck build-sdk ## Type-check the SDK, then run the tests against the built package
+	node --test tests/*.test.mjs
 
 release-check: build-sdk test ## Preflight release checks (types/tests + npm pack preview)
 	npm config get registry
@@ -164,9 +170,9 @@ release-check: build-sdk test ## Preflight release checks (types/tests + npm pac
 # What `make up` builds and serves: the API reference at /, and the two hosts
 # that are current. src/demo is not in the loop — it has not caught up with the
 # SDK migration, and `make demo` is where that has to be fixed.
-# build-sdk first: craft resolves both `@wasm-gaming/rsdkv4-wasm` and
-# `@wasm-gaming/engine-specs` through its import map, and build-specs is what
-# puts the second one in dist/.
+# build-sdk first: craft resolves `@wasm-gaming/rsdkv4-wasm` through its import
+# map, and the SDK only loads once build-specs has put the contract's runtime
+# beside it in dist/rsdkv4/.
 UP_TARGETS := build-sdk build-typedoc build-craft build-smoke build-input-doctor
 
 up: node_modules ## Dev loop: /=API reference, /craft/, /worker-smoke/ — rebuilt and reloaded on save

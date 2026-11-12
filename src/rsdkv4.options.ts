@@ -349,12 +349,15 @@ export interface Rsdkv4Assets {
 export interface Rsdkv4Storage {
   /**
    * Per-game folder for the pack, the settings and the save file, so two games do not
-   * overwrite each other. Examples: `"sonic1"`, `"rsdkv4/Sonic2"`.
+   * overwrite each other. Examples: `"sonic-1"`, `"sonic-2/profile-a"`.
    *
-   * It is a path under the engine's working root *and* the OPFS directory the SDK
-   * mirrors save data into, which is what lets a host read `<namespace>/SData.bin`
-   * itself. Anything that is not a usable relative path normalises to `"default"` —
-   * including the object you get from interpolating a game record by mistake.
+   * Relative to the engine's own folder: the SDK always prefixes `rsdkv4/`, so the
+   * files land in `rsdkv4/<namespace>/` — in WASMFS (`/data/rsdkv4/<namespace>`) and in
+   * OPFS alike — and no namespace can reach another engine's files. A host reads the
+   * resolved path from `play.storagePath`. Segments are cleaned (`.`/`..` dropped,
+   * odd characters → `_`); anything unusable normalises to `"default"`, including the
+   * object you get from interpolating a game record by mistake. A leading `rsdkv4/`
+   * (the old convention) is stripped with a warning.
    *
    * @defaultValue `"default"`
    */
@@ -496,7 +499,7 @@ export const RSDKV4_SPEC: EngineSpec<Rsdkv4Payloads> = {
     namespace: {
       default: 'default',
       live: false,
-      description: "Folder for this game's pack, settings and save file.",
+      description: "Folder for this game's pack, settings and save file, inside the engine's own rsdkv4/ folder (OPFS rsdkv4/<namespace>/).",
     },
     persist: {
       enum: ['opfs', null],

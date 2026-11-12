@@ -1,5 +1,5 @@
 
-import { $reactive } from 'https://jgermade.github.io/jq79/jq79.js';
+import { $reactive } from 'jq79';
 
 // La sonda de input: dos filas sobre el canvas con lo que el navegador tiene
 // pulsado y lo que el motor tiene retenido.
