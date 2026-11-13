@@ -54,18 +54,22 @@ build: build-sdk build-wasm build-wasm-worker ## The package: SDK + both WASM bu
 
 build-sdk: build-lib build-specs build-app ## The published package: TypeScript → dist/rsdkv4/ (no WASM)
 
-build-lib: node_modules ## Compile SDK + options → dist/rsdkv4/
+build-lib: node_modules ## Compile SDK + options → dist/rsdkv4/, self-contained (engine-specs.js beside it)
 	$(BIN)/tsc -p tsconfig.json
-
-build-specs: build-lib ## Ship the contract's runtime inside the package → dist/rsdkv4/engine-specs.js
 	# The SDK extends EngineSDKBase/EnginePlayBase, so the contract is a runtime
 	# import. It goes *next to* the SDK (inside package.json `files`) and the
 	# emitted imports are rewritten to it, so the published package loads from a
 	# plain static server — no bundler, no import map. engine-specs stays a regular
 	# dependency for its types.
+	#
+	# Here and not in a later target: every `tsc` emit has to come out localized.
+	# `make demo` re-runs this target, and when the rewrite lived in build-specs the
+	# second emit put the bare specifier back — v0.3.0's release archive shipped so.
 	cp $(SPECS)/dist/engine-specs.js dist/rsdkv4/engine-specs.js
 	node scripts/localize-specs.mjs dist/rsdkv4
 	rm -f dist/engine-specs.js
+
+build-specs: build-lib ## Kept as a name: the contract's runtime now ships with every build-lib
 
 build-app: ## The engine's own app (load-game screen + pause menu) → dist/rsdkv4/app/
 	# Plain JS + CSS, imported by hosts as <engine>/app/app.js (EngineApp). It loads
