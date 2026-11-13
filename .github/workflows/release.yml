@@ -104,6 +104,11 @@ jobs:
       - name: Pack the site
         run: |
           cp -R dist rsdkv4
+          # The archive is what launchers serve as-is: its SDK must load from a plain
+          # static server. v0.3.0 shipped a bare `@wasm-gaming/engine-specs` import.
+          test -f rsdkv4/rsdkv4/engine-specs.js
+          grep -q "from './engine-specs.js'" rsdkv4/rsdkv4/rsdkv4.sdk.js
+          ! grep -rq "from '@wasm-gaming/engine-specs'" rsdkv4/rsdkv4 --include='*.js'
           tar -czf rsdkv4.tar.gz rsdkv4
           zip -qr rsdkv4.zip rsdkv4
           ls -la rsdkv4.tar.gz rsdkv4.zip
