@@ -33,7 +33,7 @@ DIST_DIR="$ROOT_DIR/dist"
 # RSDKV4_WORKER=1 builds the *experimental* worker variant: main() on a pthread,
 # picture on a transferred OffscreenCanvas. It is opt-in and lands in a separate
 # output dir, so the shipped single-threaded build stays exactly as it is and the
-# two can be served side by side (see the worker smoke test in SESSIONS/).
+# two can be served side by side (see the worker smoke test in RECORD/).
 #
 # Why this is not the default yet: OPFS's sync access handles only exist off the
 # main thread, so the worker is what makes real persistence possible — but SDL's

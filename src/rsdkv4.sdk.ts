@@ -7,7 +7,7 @@
  * const play = await new Rsdkv4SDK()
  *   .mount(document.querySelector('#stage'))
  *   .assets({ data: () => library.readBytes('Sonic2') })
- *   .storage({ namespace: 'rsdkv4/Sonic2' })
+ *   .storage({ namespace: 'sonic-2' })        // → OPFS rsdkv4/sonic-2/
  *   .config({ startMenu: 'host' })
  *   .on('saves', ({ detail }) => paintSlots(detail))
  *   .start({ slot: 0 });
@@ -84,6 +84,16 @@ export type Rsdkv4Events_ = EventsOf<Rsdkv4Payloads>;
 
 const WORK_ROOT = '/data';
 const DEFAULT_STORAGE_NAMESPACE = 'default';
+
+/**
+ * This engine's folder in WASMFS / OPFS. Every rsdkv4 file lives under it, whatever
+ * namespace a host picks, so two engines can never share a working dir — the host
+ * chooses the sub-folder, never the root. Same value as {@link Rsdkv4SDK.id}.
+ */
+const ENGINE_ID = 'rsdkv4';
+
+/** The files this engine keeps in its namespace — and the only ones it ever migrates. */
+const ENGINE_FILES = ['Data.rsdk', 'settings.ini', 'SData.bin'] as const;
 
 /** RSDKv4's save file, written next to the game data in the working dir. */
 const SAVE_FILE = 'SData.bin';
@@ -179,20 +189,36 @@ async function resolveAsset(asset: Rsdkv4Asset | undefined): Promise<Uint8Array 
   return toUint8(typeof asset === 'function' ? await asset() : asset);
 }
 
-/** Normalize a host-provided storage namespace into a safe relative path. */
-function normalizeStorageNamespace(namespace: unknown): string {
-  if (typeof namespace !== 'string' || !namespace.trim()) return DEFAULT_STORAGE_NAMESPACE;
-
-  const cleaned = namespace
-    .split('/')
-    .map((segment) => segment.trim())
-    .filter(Boolean)
-    .map((segment) => segment.replace(/[^A-Za-z0-9._-]/g, '_'))
-    .filter(Boolean)
-    .join('/');
-
-  return cleaned || DEFAULT_STORAGE_NAMESPACE;
+/**
+ * Where an engine keeps one namespace: `<engineId>/<namespace>`, relative to the OPFS
+ * root (which is WASMFS `/data`). Written with nothing rsdkv4-specific in it, so it can
+ * move verbatim into engine-specs.
+ *
+ * The host's namespace is cleaned segment by segment: blanks dropped, `.` and `..`
+ * dropped (they used to survive, and `'../x'` walked out of the work root), anything
+ * outside `[A-Za-z0-9._-]` turned into `_`. Nothing usable left means `'default'`.
+ * A namespace that already starts with the engine id has it stripped once, so a host
+ * written against the old convention (`'rsdkv4/Sonic1'`) lands where it always did.
+ */
+export function storagePath(
+  engineId: string,
+  namespace: unknown,
+): { namespace: string; path: string; prefixed: boolean } {
+  const segments =
+    typeof namespace === 'string'
+      ? namespace
+          .split('/')
+          .map((segment) => segment.trim())
+          .filter((segment) => segment && segment !== '.' && segment !== '..')
+          .map((segment) => segment.replace(/[^A-Za-z0-9._-]/g, '_'))
+      : [];
+  const prefixed = segments.length > 1 && segments[0] === engineId;
+  if (prefixed) segments.shift();
+  const cleaned = segments.join('/') || DEFAULT_STORAGE_NAMESPACE;
+  return { namespace: cleaned, path: `${engineId}/${cleaned}`, prefixed };
 }
+
+let warnedPrefixed = false;
 
 /** The plain values behind a descriptor table — what the engine actually needs. */
 function valuesOf<T>(described: PropertiesDefinition<T>): T {
@@ -318,23 +344,59 @@ function mountWorkingDir(
 }
 
 /**
- * OPFS handle for `<namespace>/`, reached with the plain (async) OPFS API from JS —
+ * OPFS handle for `<engineId>/<namespace>/` (a {@link storagePath}), reached with the plain (async) OPFS API from JS —
  * which, unlike the WASM side's sync access handles, works on the main thread of any
  * page. Returns null when OPFS isn't available at all.
  */
 async function opfsNamespaceDir(
-  namespace: string,
+  path: string,
   create: boolean,
 ): Promise<FileSystemDirectoryHandle | null> {
   if (typeof navigator === 'undefined' || !navigator.storage?.getDirectory) return null;
   try {
     let dir = await navigator.storage.getDirectory();
-    for (const segment of namespace.split('/').filter(Boolean)) {
+    for (const segment of path.split('/').filter(Boolean)) {
       dir = await dir.getDirectoryHandle(segment, { create });
     }
     return dir;
   } catch {
     return null; // missing (create: false), or blocked
+  }
+}
+
+/**
+ * Before the namespace lived under `rsdkv4/`, the default one was a top-level
+ * `default/` — a folder snes9x, mGBA and geolith also fall back to. Copy rsdkv4's own
+ * files out of it into `rsdkv4/default/` when the new folder lacks them. Copy, never
+ * move or delete: whatever else is in `default/` is not ours to touch.
+ */
+async function migrateLegacyDefault(): Promise<void> {
+  const legacy = await opfsNamespaceDir(DEFAULT_STORAGE_NAMESPACE, false);
+  if (!legacy) return;
+  let target: FileSystemDirectoryHandle | null = null;
+  for (const name of ENGINE_FILES) {
+    let source: File;
+    try {
+      source = await (await legacy.getFileHandle(name)).getFile();
+    } catch {
+      continue;
+    }
+    target ??= await opfsNamespaceDir(`${ENGINE_ID}/${DEFAULT_STORAGE_NAMESPACE}`, true);
+    if (!target) return;
+    try {
+      await target.getFileHandle(name);
+      continue; // already there: the new layout wins
+    } catch {
+      /* missing — copy it */
+    }
+    try {
+      const writable = await (await target.getFileHandle(name, { create: true })).createWritable();
+      await writable.write(await source.arrayBuffer());
+      await writable.close();
+      console.info(`[rsdkv4] copied ${DEFAULT_STORAGE_NAMESPACE}/${name} → ${ENGINE_ID}/${DEFAULT_STORAGE_NAMESPACE}/${name}`);
+    } catch (e) {
+      console.warn(`[rsdkv4] could not migrate ${DEFAULT_STORAGE_NAMESPACE}/${name}`, e);
+    }
   }
 }
 
@@ -541,7 +603,8 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
 
   #persistent = false;
   #namespace = DEFAULT_STORAGE_NAMESPACE;
-  #workDir = `${WORK_ROOT}/${DEFAULT_STORAGE_NAMESPACE}`;
+  #storagePath = `${ENGINE_ID}/${DEFAULT_STORAGE_NAMESPACE}`;
+  #workDir = `${WORK_ROOT}/${ENGINE_ID}/${DEFAULT_STORAGE_NAMESPACE}`;
   #mirrorSaves = true;
   #saveTimer: ReturnType<typeof setInterval> | null = null;
   /** Last bytes mirrored out, so the `saves` event means "changed" and not "checked". */
@@ -851,6 +914,15 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
   }
 
   /**
+   * Where this session's files live, relative to the OPFS root: `rsdkv4/<namespace>`.
+   * The path a host walks with `navigator.storage.getDirectory()` to stage a
+   * `Data.rsdk` before booting, or to read `SData.bin` after.
+   */
+  get storagePath(): string {
+    return this.#storagePath;
+  }
+
+  /**
    * Input ownership, named. `play.input.claim(buttons)` and `play.input.release()`
    * are exactly `options({ buttons })` and `options({ buttons: null })` — same state,
    * same survival across `restart()`, same everything.
@@ -1112,8 +1184,17 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
     // Mount the working dir first, so we can see what is already persisted (OPFS)
     // before deciding whether to pull assets.
     this.#persistent = mountWorkingDir(Module, storage.persist).persistent;
-    this.#namespace = normalizeStorageNamespace(storage.namespace);
-    this.#workDir = `${WORK_ROOT}/${this.#namespace}`;
+    const resolved = storagePath(ENGINE_ID, storage.namespace);
+    if (resolved.prefixed && !warnedPrefixed) {
+      warnedPrefixed = true;
+      console.warn(
+        `[rsdkv4] storage.namespace no longer needs the "${ENGINE_ID}/" prefix — the engine adds it. Pass "${resolved.namespace}".`,
+      );
+    }
+    this.#namespace = resolved.namespace;
+    this.#storagePath = resolved.path;
+    this.#workDir = `${WORK_ROOT}/${resolved.path}`;
+    if (resolved.namespace === DEFAULT_STORAGE_NAMESPACE) await migrateLegacyDefault();
     this.#mirrorSaves = storage.persist !== null;
     ensureDir(Module, this.#workDir);
 
@@ -1226,7 +1307,7 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
       if (explicit) Module.FS.writeFile(dataPath, explicit);
       else {
         console.log(
-          `[rsdkv4] Data.rsdk already in persistent storage (${this.#namespace}) — skipping fetch`,
+          `[rsdkv4] Data.rsdk already in persistent storage (${this.#storagePath}) — skipping fetch`,
         );
       }
     } else {
@@ -1258,7 +1339,7 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
    * it changes.
    */
   async #restoreSaveData(Module: EmscriptenModule): Promise<void> {
-    const dir = await opfsNamespaceDir(this.#namespace, false);
+    const dir = await opfsNamespaceDir(this.#storagePath, false);
     if (!dir) return;
     try {
       const file = await (await dir.getFileHandle(SAVE_FILE)).getFile();
@@ -1273,7 +1354,7 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
   }
 
   /**
-   * Copy SData.bin out of the wasm into `<namespace>/`, and announce it if it moved.
+   * Copy SData.bin out of the wasm into `rsdkv4/<namespace>/`, and announce it if it moved.
    *
    * The division of labour the session settled on: the SDK owns getting the bytes out
    * of the wasm and into the namespace both sides already agree on; a host owns
@@ -1295,7 +1376,7 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
     }
     if (sameBytes(bytes, this.#lastSave)) return;
 
-    const dir = await opfsNamespaceDir(this.#namespace, true);
+    const dir = await opfsNamespaceDir(this.#storagePath, true);
     if (dir) {
       try {
         const handle = await dir.getFileHandle(SAVE_FILE, { create: true });
@@ -1432,7 +1513,7 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
  * Everything on it is the contract's — see the module doc for the shape of a call.
  */
 export class Rsdkv4SDK extends EngineSDKBase<Rsdkv4Payloads> {
-  static readonly id = 'rsdkv4';
+  static readonly id = ENGINE_ID;
   /** Kept in step with package.json by `node scripts/sync-version.mjs`. */
   static readonly version = '0.2.1';
   static readonly name = 'Retro Software Development Kit v4';

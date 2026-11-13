@@ -51,8 +51,8 @@ jobs:
         run: npm ci
       - name: Build the package (TypeScript → dist/rsdkv4/)
         run: make build-sdk
-      - name: Typecheck
-        run: make typecheck
+      - name: Typecheck and test (the built package, loaded with no import map)
+        run: make test
 
       # Packed here, where the version is already stamped and dist/ is on disk,
       # so the bytes that get published are the bytes that were tested.

@@ -172,9 +172,10 @@ jobs:
             coi.js \
             rsdkv4/rsdkv4.sdk.js \
             rsdkv4/rsdkv4.wasm \
-            engine-specs.js \
+            rsdkv4/engine-specs.js \
             demo.js \
-            craft/index.html
+            craft/index.html \
+            craft/vendor/jq79.js
           do
             test -f "dist/$path" || { echo "missing: dist/$path"; exit 1; }
           done

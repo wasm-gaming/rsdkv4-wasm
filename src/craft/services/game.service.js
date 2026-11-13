@@ -1,5 +1,5 @@
 
-import { $reactive } from 'https://jgermade.github.io/jq79/jq79.js';
+import { $reactive } from 'jq79';
 import { opfsService } from './opfs.service.js';
 import Rsdkv4SDK from '@wasm-gaming/rsdkv4-wasm';   // ya mapeado en el importmap de craft/index.html
 
@@ -8,7 +8,7 @@ import Rsdkv4SDK from '@wasm-gaming/rsdkv4-wasm';   // ya mapeado en el importma
 //   const play = await new Rsdkv4SDK()
 //     .mount(el)                              // un <canvas> se usa tal cual; otro elemento y lo crea dentro
 //     .assets({ data: () => bytes })          // Data.rsdk: el thunk sólo se llama si no hay copia guardada
-//     .storage({ namespace: `rsdkv4/${gameId}` })
+//     .storage({ namespace: gameId })         // → OPFS rsdkv4/<gameId>/ (el SDK pone el prefijo)
 //     .config({ startMenu: 'host' })          // las pantallas de save/personaje las pinta craft
 //     .start()
 //   play.game.start(slot, player)             // slot 0-3, o null = NO SAVE
@@ -392,7 +392,7 @@ export const gameService = $reactive({
         .assets({
           data: () => opfsService.readFileFromOPFS(`${gameId}/Data.rsdk`).then(f => f.arrayBuffer()),
         })
-        .storage({ namespace: `rsdkv4/${gameId}` })   // mismo layout OPFS que opfs.service.js (LIBRARY_DIR)
+        .storage({ namespace: gameId })               // → rsdkv4/<gameId>/, el mismo sitio que opfs.service.js (LIBRARY_DIR)
         .config({ startMenu: 'host' })                // antes: options.skipStartMenu
         .on('error', ({ detail }) => console.error('[rsdkv4]', detail))
         // El motor guarda a su ritmo (partida nueva, checkpoint, fin de acto) y el

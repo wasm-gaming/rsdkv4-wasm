@@ -1,12 +1,13 @@
-
-// Matches the layout the SDK itself uses (src/vanilla/storage.js, src/demo/library.ts):
+// The engine's own folder in OPFS. The SDK owns it: whatever namespace a host
+// passes, the files land in rsdkv4/<namespace>/ (see `storagePath` in
+// src/rsdkv4.sdk.ts, and `play.storagePath`):
 //
 //   rsdkv4/Sonic1/Data.rsdk      ← the player's pack, written here
 //   rsdkv4/Sonic1/settings.ini   ← written by the SDK on first launch
 //   rsdkv4/Sonic2/…
 //
 // Every `path` below is relative to that root, so 'Sonic1/Data.rsdk' is exactly
-// the file the engine opens when booted with `storageNamespace: 'rsdkv4/Sonic1'`.
+// the file the engine opens when booted with `storage({ namespace: 'Sonic1' })`.
 // The folder name is the game id, and OPFS is case-sensitive — 'sonic1' would be
 // a second library the engine never looks in.
 const LIBRARY_DIR = 'rsdkv4';
