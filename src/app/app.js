@@ -135,49 +135,42 @@ export async function mount(target, host) {
 
   // ---- screens ------------------------------------------------------------------
 
+  // craft's slot cards (src/craft/views/GameLauncher.html), kept as they were: a short
+  // NO SAVE card, then the four slots — a saved one shows where it stopped, an empty
+  // one is the character picker (click, or ↑/↓, cycles it) over PLAY.
   const slotCard = (i) => {
     const focused = state.focus === i ? ' is-focused' : '';
     if (i === 0) {
-      const p = state.pick[0];
-      return `<button class="card is-nosave${focused}" data-card="0">
-        <span class="card-head">Sin guardar</span>
-        ${characterPicker(0, p)}
-        <span class="card-play">Jugar</span>
-      </button>`;
+      return `<div class="slot-card is-nosave${focused}" data-card="0" role="button">NO SAVE</div>`;
     }
     const slot = state.slots[i - 1];
     const info = describeSlot(slot, state.type);
     if (!info) {
-      const p = state.pick[i];
-      return `<button class="card is-new${focused}" data-card="${i}">
-        <span class="card-head">Partida ${i}</span>
-        ${characterPicker(i, p)}
-        <span class="card-play">Nueva</span>
-      </button>`;
+      const art = PLAYER_ART[state.pick[i]];
+      return `<div class="slot-card is-new${focused}" data-focus="${i}">
+        <button type="button" class="player-choose" data-player="${art}" data-pick="${i}" data-dir="1"
+                title="${esc(PLAYER_NAMES[state.pick[i]] ?? '')}">
+          <img src="${asset(`player-${art}.svg`)}" alt="">
+        </button>
+        <button type="button" class="slot-play" data-card="${i}">PLAY</button>
+      </div>`;
     }
     const gems = emeraldCount(slot.emeralds);
     const char = PLAYER_ART[slot.character] ?? 'sonic';
-    return `<button class="card is-saved${focused}" data-card="${i}">
-      <span class="card-head">Partida ${i}</span>
-      <span class="shot">
-        ${info.img ? `<img src="${info.img}" alt="">` : ''}
-        <span class="shot-tag">${esc(info.tag)}</span>
-        <img class="shot-player" src="${asset(`player-${char}.svg`)}" alt="">
-      </span>
-      <span class="zone">${esc(info.name)}${info.act ? `<small> · acto ${info.act}</small>` : ''}</span>
-      <span class="gems" title="${gems} de 7 esmeraldas">${GEMS.map((c, g) => `<i style="--gem:${c}"${g < gems ? ' class="on"' : ''}></i>`).join('')}</span>
-      <span class="stats"><span>Vidas ${slot.lives}</span><span>${String(slot.score).padStart(6, '0')}</span></span>
-      <span class="card-play">Continuar</span>
-    </button>`;
-  };
-
-  const characterPicker = (card, p) => {
-    const count = Math.max(1, Math.min(PLAYER_ART.length, state.players.length || 1));
-    const name = PLAYER_NAMES[p] ?? state.players[p] ?? '';
-    return `<span class="picker" data-player="${PLAYER_ART[p]}">
-      <img src="${asset(`player-${PLAYER_ART[p]}.svg`)}" alt="">
-      ${count > 1 ? `<span class="picker-name"><b data-pick="${card}" data-dir="-1">‹</b>${esc(name)}<b data-pick="${card}" data-dir="1">›</b></span>` : ''}
-    </span>`;
+    return `<div class="slot-card is-saved${focused}" data-focus="${i}">
+      <div class="stage-shot">
+        <div class="stage-badge">${info.img ? `<img src="${info.img}" alt="${esc(info.name)}">` : ''}</div>
+        <div class="zone-tag">${esc(info.tag)}</div>
+        <div class="player-icon"><img src="${asset(`player-${char}.svg`)}" alt=""></div>
+      </div>
+      <div class="zone-title" title="${esc(info.name)}${info.act ? ` · act ${info.act}` : ''}">${esc(info.name)}</div>
+      <div class="emeralds" title="${gems} of 7 chaos emeralds">${GEMS.map((c, g) => `<i style="--gem:${c}"${g < gems ? ' class="on"' : ''}></i>`).join('')}</div>
+      <div class="stats-grid">
+        <span title="Lives"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="#f43f5e" d="M8 14.2 1.9 8.4A3.6 3.6 0 0 1 8 3.6a3.6 3.6 0 0 1 6.1 4.8z"/></svg>${slot.lives}</span>
+        <span title="Score"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="#fbbf24" d="m8 1.2 2.1 4.3 4.7.7-3.4 3.3.8 4.7L8 12l-4.2 2.2.8-4.7L1.2 6.2l4.7-.7z"/></svg>${slot.score}</span>
+      </div>
+      <button type="button" class="slot-play" data-card="${i}">CONTINUE</button>
+    </div>`;
   };
 
   const hints = (pairs) =>
@@ -215,7 +208,7 @@ export async function mount(target, host) {
       const saved = slot && !slot.empty;
       html += `<section class="rsdk-slots">
         <header><p class="kicker">${esc(host.game?.title ?? '')}</p><h2>Elige partida</h2></header>
-        <div class="cards">${[0, 1, 2, 3, 4].map(slotCard).join('')}</div>
+        <div class="slot-cards">${[0, 1, 2, 3, 4].map(slotCard).join('')}</div>
         ${hints([
           ['←→', 'partida'],
           ...(saved ? [] : [['↑↓', 'personaje']]),
@@ -246,8 +239,8 @@ export async function mount(target, host) {
     overlay.innerHTML = html;
     // On a narrow screen the cards scroll sideways: keep the focused one in view
     // (by hand — scrollIntoView would also scroll the host's page).
-    const cards = overlay.querySelector('.cards');
-    const focused = cards?.querySelector('.card.is-focused');
+    const cards = overlay.querySelector('.slot-cards');
+    const focused = cards?.querySelector('.slot-card.is-focused');
     if (cards && focused && cards.scrollWidth > cards.clientWidth) {
       cards.scrollLeft = focused.offsetLeft - (cards.clientWidth - focused.offsetWidth) / 2;
     }
@@ -438,11 +431,12 @@ export async function mount(target, host) {
       if (at === lastPointer) return;
       lastPointer = at;
     }
-    const el = event.target.closest('[data-card],[data-item],[data-confirm],[data-exit],[data-pick]');
+    const el = event.target.closest('[data-card],[data-item],[data-confirm],[data-exit],[data-pick],[data-focus]');
     if (!el || leaving) return;
     if (event.type === 'pointermove') {
-      if (el.dataset.card != null && state.screen === 'slots' && state.focus !== +el.dataset.card) {
-        state.focus = +el.dataset.card;
+      const card = el.closest('[data-focus]')?.dataset.focus ?? el.dataset.card ?? el.dataset.pick;
+      if (card != null && state.screen === 'slots' && state.focus !== +card) {
+        state.focus = +card;
         render();
       } else if (el.dataset.item != null && state.pause.focus !== +el.dataset.item) {
         state.pause.focus = +el.dataset.item;
