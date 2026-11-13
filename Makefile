@@ -38,7 +38,7 @@ SPECS := node_modules/@wasm-gaming/engine-specs
 SPECS_DEMO := $(SPECS)/demo
 
 .PHONY: build build-sdk build-lib build-specs build-wasm build-wasm-worker \
-	demo build-typedoc build-demo build-vanilla build-craft build-smoke build-input-doctor \
+	build-app demo build-typedoc build-demo build-vanilla build-craft build-smoke build-input-doctor \
 	up preview preview.single typecheck test release-check i install clean clean-all help
 
 i: install
@@ -52,7 +52,7 @@ node_modules: package.json
 
 build: build-sdk build-wasm build-wasm-worker ## The package: SDK + both WASM builds → dist/
 
-build-sdk: build-lib build-specs ## The published package: TypeScript → dist/rsdkv4/ (no WASM)
+build-sdk: build-lib build-specs build-app ## The published package: TypeScript → dist/rsdkv4/ (no WASM)
 
 build-lib: node_modules ## Compile SDK + options → dist/rsdkv4/
 	$(BIN)/tsc -p tsconfig.json
@@ -66,6 +66,15 @@ build-specs: build-lib ## Ship the contract's runtime inside the package → dis
 	cp $(SPECS)/dist/engine-specs.js dist/rsdkv4/engine-specs.js
 	node scripts/localize-specs.mjs dist/rsdkv4
 	rm -f dist/engine-specs.js
+
+build-app: ## The engine's own app (load-game screen + pause menu) → dist/rsdkv4/app/
+	# Plain JS + CSS, imported by hosts as <engine>/app/app.js (EngineApp). It loads
+	# the SDK next to it relatively, and takes the art it paints from craft's assets.
+	rm -rf dist/rsdkv4/app
+	mkdir -p dist/rsdkv4/app/assets
+	cp src/app/app.js src/app/app.css dist/rsdkv4/app/
+	cp -R src/craft/assets/stages-sonic1 src/craft/assets/stages-sonic2 dist/rsdkv4/app/assets/
+	cp src/craft/assets/player-*.svg dist/rsdkv4/app/assets/
 
 demo: build-typedoc build-demo build-smoke build-input-doctor ## The site: API reference + demo shell + hosts + smoke page + input doctor
 
