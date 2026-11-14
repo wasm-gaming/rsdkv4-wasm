@@ -185,10 +185,9 @@ export interface Rsdkv4InputDefaults {
 /**
  * The engine's own default bindings. See {@link Rsdkv4InputDefaults}.
  *
- * Directions are the arrow keys. This build's `ProcessInput()` also reads `KeyW`,
- * `KeyA`, `KeyS` and `KeyD` as a second set of them, and takes those three scancodes
- * off `x`, `y` and `z` to do it — so the table below is what a *claiming* host should
- * bind, and the engine under SDL polling answers to both.
+ * The keyboard is what the SDK's generated `settings.ini` binds (`RSDKV4_KEYBOARD_1`),
+ * the same in the three Sonics: arrows, A/S/D for A/B/C, Z/X/C for X/Y/Z, Q/E for L/R,
+ * Enter and Tab. A host's own `assets.settings` replaces it, and this table with it.
  *
  * This replaces the old `RSDKV4_KEYMAP`, which nothing read and which was wrong in
  * three ways for want of ever being checked against the engine: it listed 9 of the
@@ -200,12 +199,12 @@ export const RSDKV4_INPUT: Rsdkv4InputDefaults = {
     down: 'ArrowDown',
     left: 'ArrowLeft',
     right: 'ArrowRight',
-    a: 'KeyZ',
-    b: 'KeyX',
-    c: 'KeyC',
-    x: 'KeyA',
-    y: 'KeyS',
-    z: 'KeyD',
+    a: 'KeyA',
+    b: 'KeyS',
+    c: 'KeyD',
+    x: 'KeyZ',
+    y: 'KeyX',
+    z: 'KeyC',
     l: 'KeyQ',
     r: 'KeyE',
     start: 'Enter',

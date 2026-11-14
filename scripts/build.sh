@@ -349,7 +349,7 @@ cat << 'EOF' > "$WORK_DIR/RSDKv4/WebInput.cpp"
 //    button B as well as on start (only the script interpreter ever writes
 //    ENGINE_INITPAUSE — Script.cpp → RetroGameLoop.cpp), and B is also a jump
 //    button (Object.cpp: jumpPress = keyPress.C | keyPress.B | keyPress.A). So
-//    on a keyboard the jump key `x` jumps AND opens the pause menu. The pack is
+//    on a keyboard the jump key `s` jumps AND opens the pause menu. The pack is
 //    compiled and encrypted, so the fix is to stop feeding B.
 //
 // 2. web_input_take(): lets the host own the buttons outright — touch controls,
@@ -387,7 +387,7 @@ EM_JS(int, web_input_pull, (), {
 // dev menu (~10 sites in Debug.cpp) and in the pause menu (PauseMenu.cpp);
 // clearing B unconditionally leaves both with no way out.
 //
-// Chosen over remapping the defaults because it costs no key — z, x and c all
+// Chosen over remapping the defaults because it costs no key — a, s and d all
 // keep jumping, and the engine's key table is 1:1, so dropping B from it would
 // leave only two — and because it covers the gamepad for free: B's contMapping
 // is SDL_CONTROLLER_BUTTON_B, so the east button pauses today too.
@@ -547,38 +547,11 @@ helper = """// WebInput.cpp. Declared here rather than in a header: one file, on
 int web_input_take();                 // 1 = the host wrote inputDevice; do not poll SDL
 void web_input_fold_jump(bool *held); // B into A while a stage runs
 
-// WASD as a second set of directions, alongside the arrows.
-//
-// It is a convenience, not a fix. It was added on the theory that the arrow keys
-// were ghosting on the reporter's keyboard; measuring the browser afterwards showed
-// seven simultaneous keys and every arrow combination arriving intact, so that
-// theory is dead. Kept because plenty of players reach for WASD anyway.
-static inline bool isWasdAlias(int scancode)
-{
-    return scancode == SDL_SCANCODE_W || scancode == SDL_SCANCODE_A || scancode == SDL_SCANCODE_S
-           || scancode == SDL_SCANCODE_D;
-}
-
+// One key per button, as settings.ini binds it (the SDK writes [Keyboard 1]: arrows,
+// A/S/D = A/B/C, Z/X/C = X/Y/Z). An earlier version also read W/A/S/D as a second
+// set of directions; it went when A/S/D became face buttons.
 static inline bool isKeyHeld(int buttonIdx, const byte *keyState, int length)
 {
-    switch (buttonIdx) {
-        case INPUT_UP:    if (keyState[SDL_SCANCODE_W]) return true; break;
-        case INPUT_DOWN:  if (keyState[SDL_SCANCODE_S]) return true; break;
-        case INPUT_LEFT:  if (keyState[SDL_SCANCODE_A]) return true; break;
-        case INPUT_RIGHT: if (keyState[SDL_SCANCODE_D]) return true; break;
-
-        // The aliases above take W/A/S/D away from whoever else holds them, which by
-        // default is X, Y and Z: Userdata.cpp binds them to A, S and D. Left alone,
-        // one physical key would raise a direction *and* a face button. Nothing in
-        // the native code reads X/Y/Z (checked: PauseMenu.cpp, Debug.cpp, Scene.cpp),
-        // but a pack's bytecode can, and a double binding nobody chose is not worth
-        // leaving in.
-        default:
-            if (isWasdAlias(inputDevice[buttonIdx].keyMappings))
-                return false;
-            break;
-    }
-
     // Bounds-checked, unlike the code this replaces: keyMappings comes out of
     // settings.ini, so a hand-edited file is an out-of-bounds read on SDL's array.
     const int scancode = inputDevice[buttonIdx].keyMappings;
