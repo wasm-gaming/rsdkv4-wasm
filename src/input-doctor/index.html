@@ -95,12 +95,12 @@
 </main>
 
 <script>
-  // Teclas que el motor lee: las flechas y WASD como direcciones, ZXC como los
-  // botones A/B/C, Enter = start, Tab = select. ShiftLeft está sólo como control:
+  // Teclas que el motor lee: las flechas como direcciones, ASD como los botones
+  // A/B/C, ZXC como X/Y/Z, Enter = start, Tab = select. ShiftLeft está sólo como control:
   // no la usa el juego, y sirve para ver que la página responde.
   const WATCH = [
     'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-    'KeyW', 'KeyA', 'KeyS', 'KeyD',
+    'KeyA', 'KeyS', 'KeyD',
     'KeyZ', 'KeyX', 'KeyC', 'Enter', 'Space', 'Tab', 'ShiftLeft',
   ];
 
@@ -109,17 +109,15 @@
   const COMBOS = [
     ['ArrowLeft', 'ArrowDown'],
     ['ArrowRight', 'ArrowDown'],
-    ['ArrowLeft', 'ArrowDown', 'KeyZ'],
-    ['ArrowRight', 'ArrowDown', 'KeyZ'],
-    ['ArrowLeft', 'ArrowDown', 'KeyX'],
-    ['ArrowRight', 'ArrowDown', 'KeyX'],
+    ['ArrowLeft', 'ArrowDown', 'KeyA'],
+    ['ArrowRight', 'ArrowDown', 'KeyA'],
+    ['ArrowLeft', 'ArrowDown', 'KeyS'],
+    ['ArrowRight', 'ArrowDown', 'KeyS'],
     ['ArrowUp', 'ArrowLeft'],
     ['ArrowUp', 'ArrowRight'],
-    ['ArrowDown', 'KeyZ'],
-    ['KeyA', 'KeyS'],
-    ['KeyD', 'KeyS'],
-    ['KeyA', 'KeyS', 'KeyZ'],
-    ['KeyD', 'KeyS', 'KeyZ'],
+    ['ArrowDown', 'KeyA'],
+    ['ArrowLeft', 'ArrowDown', 'KeyD'],
+    ['ArrowRight', 'ArrowDown', 'KeyD'],
   ];
 
   const label = (code) => code.replace(/^(Key|Arrow)/, '');

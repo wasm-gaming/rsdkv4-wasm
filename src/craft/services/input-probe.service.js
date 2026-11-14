@@ -23,23 +23,20 @@ import { $reactive } from 'jq79';
 /** El orden de bits del motor. Coincide con RSDKV4_BUTTONS del SDK. */
 const BUTTONS = ['up', 'down', 'left', 'right', 'a', 'b', 'c', 'x', 'y', 'z', 'l', 'r', 'start', 'select'];
 
-// KeyboardEvent.code por botón, como los ata [Keyboard 1] de settings.ini, más
-// los alias WASD que ProcessInput añade en este build.
-//
-// x, y, z no aparecen: el ini los ata a KeyA/KeyS/KeyD y el alias direccional les
-// gana, así que en este build no tienen tecla. Nada del motor los lee (ni
-// PauseMenu.cpp ni Debug.cpp ni Scene.cpp), y Sonic 1 y 2 tampoco.
+// KeyboardEvent.code por botón, como los ata [Keyboard 1] del settings.ini que
+// genera el SDK (RSDKV4_KEYBOARD_1): flechas, A/S/D = A/B/C, Z/X/C = X/Y/Z, como
+// en los otros Sonic.
 const CODES = {
-  up: ['ArrowUp', 'KeyW'],
-  down: ['ArrowDown', 'KeyS'],
-  left: ['ArrowLeft', 'KeyA'],
-  right: ['ArrowRight', 'KeyD'],
-  a: ['KeyZ'],
-  b: ['KeyX'],
-  c: ['KeyC'],
-  x: [],
-  y: [],
-  z: [],
+  up: ['ArrowUp'],
+  down: ['ArrowDown'],
+  left: ['ArrowLeft'],
+  right: ['ArrowRight'],
+  a: ['KeyA'],
+  b: ['KeyS'],
+  c: ['KeyD'],
+  x: ['KeyZ'],
+  y: ['KeyX'],
+  z: ['KeyC'],
   l: ['KeyQ'],
   r: ['KeyE'],
   start: ['Enter'],

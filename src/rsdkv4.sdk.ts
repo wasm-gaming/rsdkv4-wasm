@@ -150,19 +150,21 @@ const INPUT_ERROR_INTERVAL_MS = 1000;
  * the engine binds), `key` is what it produced, and a browser or a remapping tool that
  * reports only one of the two still lands.
  *
- * WASD is included because this build's `ProcessInput()` reads those scancodes as a
- * second set of directions. They have no default action to prevent today, so this
- * costs nothing and stops mattering the day the page grows a shortcut on one of them.
+ * The letters are the face buttons the generated `settings.ini` binds (A/S/D, Z/X/C).
+ * They have no default action to prevent today, so this costs nothing and stops
+ * mattering the day the page grows a shortcut on one of them.
  */
 const ENGINE_KEYS = new Set([
   'ArrowUp',
   'ArrowDown',
   'ArrowLeft',
   'ArrowRight',
-  'KeyW',
   'KeyA',
   'KeyS',
   'KeyD',
+  'KeyZ',
+  'KeyX',
+  'KeyC',
   'Space',
   ' ',
   'Tab',
@@ -240,6 +242,29 @@ function valuesOf<T>(described: PropertiesDefinition<T>): T {
  * session's own `stage` is applied after boot instead, through the engine's stage
  * loader, which is why it survives a `restart()`.
  */
+/**
+ * Player 1's keyboard in the generated `settings.ini` (`[Keyboard 1]`), the same in the
+ * three Sonics: arrows, A/S/D for buttons A/B/C, Z/X/C for X/Y/Z, Q/E for L/R, Enter =
+ * Start, Tab = Select. SDL2 scancodes, which is what this build's `ProcessInput()`
+ * reads. The decompilation's own defaults were Z/X/C for A/B/C and A/S/D for X/Y/Z.
+ */
+export const RSDKV4_KEYBOARD_1 = {
+  Up: 82,
+  Down: 81,
+  Left: 80,
+  Right: 79,
+  A: 4, // A
+  B: 22, // S
+  C: 7, // D
+  X: 29, // Z
+  Y: 27, // X
+  Z: 6, // C
+  L: 20, // Q
+  R: 8, // E
+  Start: 40, // Enter
+  Select: 43, // Tab
+} as const;
+
 function buildSettingsIni(config: Rsdkv4Config): string {
   return [
     '[Dev]',
@@ -254,6 +279,9 @@ function buildSettingsIni(config: Rsdkv4Config): string {
     '',
     '[Window]',
     `VSync=${config.vsync ? 'true' : 'false'}`,
+    '',
+    '[Keyboard 1]',
+    ...Object.entries(RSDKV4_KEYBOARD_1).map(([key, scancode]) => `${key}=${scancode}`),
     '',
   ].join('\n');
 }
