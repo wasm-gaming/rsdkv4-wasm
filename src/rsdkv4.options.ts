@@ -51,6 +51,13 @@ export type Rsdkv4Asset = Rsdkv4AssetData | (() => Rsdkv4AssetData | Promise<Rsd
  */
 export interface Rsdkv4Config {
   /**
+   * How the picture is scaled up: crisp pixels, or the browser's smoothing. A CSS
+   * `image-rendering` on the canvas, so it applies live.
+   *
+   * @defaultValue `'pixelated'`
+   */
+  renderFilter?: 'pixelated' | 'smooth';
+  /**
    * VSync the engine's SDL window.
    *
    * @defaultValue `true`
@@ -431,6 +438,18 @@ export interface Rsdkv4Payloads extends EnginePayloads {
  */
 export const RSDKV4_SPEC: EngineSpec<Rsdkv4Payloads> = {
   config: {
+    renderFilter: {
+      default: 'pixelated',
+      enum: ['pixelated', 'smooth'],
+      live: true,
+      description: 'Scaling: crisp pixels or the browser\'s smoothing (CSS image-rendering on the canvas).',
+      label: { en: 'Smoothing', es: 'Suavizado' },
+      group: 'video',
+      valueLabels: [
+        { en: 'Sharp pixels', es: 'Píxeles nítidos' },
+        { en: 'Smooth', es: 'Suavizado' },
+      ],
+    },
     vsync: { default: true, live: false, description: 'VSync the engine window.' },
     devMenu: {
       default: false,
