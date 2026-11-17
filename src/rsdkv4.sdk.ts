@@ -78,6 +78,8 @@ export type {
   RsdkSaveSlot,
 } from './rsdkv4.options.js';
 export { RSDKV4_BUTTONS, RSDKV4_INPUT, RSDKV4_SPEC } from './rsdkv4.options.js';
+export { RSDKV4_CONTROLS, controlTables, remapPad, type Rsdkv4Controls, type Rsdkv4ControlSpec } from './rsdkv4.controls.js';
+import { controlTables, keyCodeOf, remapPad, type Rsdkv4Controls, type Rsdkv4ControlTables } from './rsdkv4.controls.js';
 
 /** The core events unioned with this engine's own — what `on`/`off` accept. */
 export type Rsdkv4Events_ = EventsOf<Rsdkv4Payloads>;
@@ -652,6 +654,45 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
    */
   #pauseOwner: string | null = null;
 
+  #controls: Rsdkv4Controls = {};
+  #tables: Rsdkv4ControlTables = controlTables();
+  #getGamepads: (() => (Gamepad | null)[]) | null = null;
+
+  /**
+   * The keyboard, remapped (see `rsdkv4.controls.ts`): a physical key bound to a control
+   * reaches the engine as that control's default key; a default key no control has any more
+   * is swallowed. Real presses only: the ones replayed here pass through.
+   */
+  #onRemapKey = (event: KeyboardEvent): void => {
+    if (!event.isTrusted || this.#pauseOwner || !this.#module) return;
+    const control = this.#tables.keys.get(event.code);
+    if (!control && !this.#tables.blocked.has(event.code)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!control || event.repeat) return;
+    const replay = new KeyboardEvent(event.type, { code: control.code, key: control.key, bubbles: true, cancelable: true });
+    for (const name of ['keyCode', 'which']) Object.defineProperty(replay, name, { get: () => keyCodeOf(control) });
+    (this.#canvas ?? window).dispatchEvent(replay);
+  };
+
+  /** The canvas's scaling, from `config.renderFilter`. */
+  async #applyFilter(): Promise<void> {
+    const canvas = this.#canvas;
+    if (!canvas) return;
+    const described = (await this.config()) as unknown as { renderFilter?: { value?: string } };
+    canvas.style.imageRendering = described.renderFilter?.value === 'smooth' ? 'auto' : 'pixelated';
+  }
+
+  /**
+   * Rebind the controls (ids from {@link RSDKV4_CONTROLS}): physical keys
+   * (`KeyboardEvent.code`) and every pad's buttons (standard mapping). What is left out keeps
+   * the engine's default. Live.
+   */
+  setControls(controls: Rsdkv4Controls): void {
+    this.#controls = controls;
+    this.#tables = controlTables(controls);
+  }
+
   /**
    * The host's button object while it holds a claim, by reference — read on the
    * engine's callback, never copied.
@@ -705,6 +746,10 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
    */
   protected override async close(): Promise<void> {
     this.#destroyed = true;
+    window.removeEventListener('keydown', this.#onRemapKey, true);
+    window.removeEventListener('keyup', this.#onRemapKey, true);
+    if (this.#getGamepads) (navigator as Navigator & { getGamepads: () => (Gamepad | null)[] }).getGamepads = this.#getGamepads;
+    this.#getGamepads = null;
 
     if (this.#saveTimer !== null) {
       clearInterval(this.#saveTimer);
@@ -789,6 +834,7 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
     canvas.addEventListener('contextmenu', this.#swallowContextMenu);
     canvas.addEventListener('pointerdown', this.#onPointerDown);
     canvas.addEventListener('keydown', this.#onKeyDown);
+    void this.#applyFilter();
     window.addEventListener('resize', this.#onResize);
     // Fullscreen transitions need a refit too.
     document.addEventListener('fullscreenchange', this.#onFullscreenChange);
@@ -806,6 +852,7 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
    * a `restart()` is for.
    */
   protected override async patched(kind: PayloadKind, patch: object): Promise<void> {
+    if (kind === 'config' && 'renderFilter' in patch) return this.#applyFilter();
     if (kind !== 'options') return;
 
     // Ahead of the engine check, unlike everything below it: a claim written onto an
@@ -1236,6 +1283,19 @@ export class Rsdkv4Play extends EnginePlayBase<Rsdkv4Payloads> {
 
     // Run main() from the working dir. simulate_infinite_loop schedules the rAF loop
     // and returns via a benign unwind Emscripten swallows.
+    // The player's bindings sit in front of SDL: keys on the window (capture), pads through
+    // a wrapped navigator.getGamepads().
+    this.#tables = controlTables(this.#controls);
+    window.addEventListener('keydown', this.#onRemapKey, true);
+    window.addEventListener('keyup', this.#onRemapKey, true);
+    const nav = navigator as Navigator & { getGamepads?: () => (Gamepad | null)[] };
+    if (nav.getGamepads && !this.#getGamepads) {
+      const original = nav.getGamepads.bind(nav);
+      this.#getGamepads = nav.getGamepads;
+      nav.getGamepads = () =>
+        original().map((pad) => (pad ? (remapPad(pad, this.#tables.pad) as unknown as Gamepad) : pad));
+    }
+
     Module.callMain(['UsingCWD']);
 
     // callMain only *schedules* the loop: Engine::Init runs on the first frame, and

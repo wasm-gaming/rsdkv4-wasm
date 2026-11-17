@@ -37,7 +37,7 @@
   "scripts": {},
   "comment:dependencies": "engine-specs is the one wasm-gaming package an engine depends on. Its runtime is also copied into dist/rsdkv4/ and imported relatively, so the built SDK loads without a bundler or an import map; the dependency is what carries the types.",
   "dependencies": {
-    "@wasm-gaming/engine-specs": "^0.3.2"
+    "@wasm-gaming/engine-specs": "^0.6.1"
   },
   "devDependencies": {
     "jq79": "^0.5.10",

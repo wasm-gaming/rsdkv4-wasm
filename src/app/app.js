@@ -13,9 +13,75 @@
 // Plain JS and DOM on purpose: the app ships inside the engine's package next to the
 // SDK and loads from a static server, so it imports nothing but the SDK.
 
-import Rsdkv4SDK from '../rsdkv4.sdk.js';
+import Rsdkv4SDK, { RSDKV4_CONTROLS } from '../rsdkv4.sdk.js';
+import {
+  SHARED_SETTINGS,
+  controlsModel,
+  createFullscreenToggle,
+  createPerfCounter,
+  createSettingsScreen,
+  createWakeLock,
+  loadSettings,
+  resolveLocale,
+  saveSettings,
+  settingsDefaults,
+  settingsModel,
+} from '../engine-specs.js';
 
 const OWNER = 'app';
+const ENGINE_ID = 'rsdkv4';
+
+/** The app's words, in English and Spanish (engine-specs UX.md, "Languages"). */
+const STRINGS = {
+  booting: { en: 'Starting the engine…', es: 'Arrancando el motor…' },
+  bootFailed: { en: 'Could not start', es: 'No se pudo arrancar' },
+  back: { en: 'Back', es: 'Volver' },
+  chooseGame: { en: 'Choose a game', es: 'Elige partida' },
+  game: { en: 'game', es: 'partida' },
+  character: { en: 'character', es: 'personaje' },
+  continueHint: { en: 'continue', es: 'continuar' },
+  playHint: { en: 'play', es: 'jugar' },
+  deleteHint: { en: 'delete', es: 'borrar' },
+  backHint: { en: 'back', es: 'volver' },
+  quitHint: { en: 'quit', es: 'salir' },
+  choose: { en: 'choose', es: 'elegir' },
+  paused: { en: 'Paused', es: 'Pausa' },
+  continue: { en: 'Continue', es: 'Continuar' },
+  changeGame: { en: 'Change game', es: 'Cambiar de partida' },
+  changeGameHint: { en: 'back to the saved games', es: 'vuelve a las partidas guardadas' },
+  packScreenHint: { en: "the game's own screen", es: 'pantalla del propio juego' },
+  settings: { en: 'Settings', es: 'Ajustes' },
+  fullscreen: { en: 'Fullscreen', es: 'Pantalla completa' },
+  fullscreenHint: { en: 'Alt+Enter · Select + Y', es: 'Alt+Enter · Select + Y' },
+  fullscreenHintMac: { en: 'Cmd+Enter · Select + Y', es: 'Cmd+Enter · Select + Y' },
+  exit: { en: 'Back to the launcher', es: 'Volver al lanzador' },
+  leaveAsk: { en: 'Back to the launcher?', es: '¿Volver al lanzador?' },
+  leaveText: { en: 'The game saves where the game itself saves.', es: 'La partida se guarda donde la guarde el juego.' },
+  leave: { en: 'Leave', es: 'Salir' },
+  stay: { en: 'Stay', es: 'Seguir' },
+  deleteAsk: { en: 'Delete game {n}?', es: '¿Borrar la partida {n}?' },
+  noUndo: { en: 'This cannot be undone.', es: 'No se puede deshacer.' },
+  delete: { en: 'Delete', es: 'Borrar' },
+  cancel: { en: 'Cancel', es: 'Cancelar' },
+  levelSelect: { en: 'Level select', es: 'Selector de nivel' },
+  stageMenu: { en: 'Stage menu', es: 'Menú de fases' },
+  sonicAndTails: { en: 'Sonic and Tails', es: 'Sonic y Tails' },
+};
+
+const DIRECTIONS = {
+  up: { en: 'Up', es: 'Arriba' },
+  down: { en: 'Down', es: 'Abajo' },
+  left: { en: 'Left', es: 'Izquierda' },
+  right: { en: 'Right', es: 'Derecha' },
+};
+/** The pad's buttons, for Ajustes → Controles. */
+const BUTTONS = RSDKV4_CONTROLS.map((c) => ({ id: c.id, label: DIRECTIONS[c.id] ?? c.label }));
+const DEFAULT_CONTROLS = Object.fromEntries(RSDKV4_CONTROLS.map((c) => [c.id, { code: c.code, button: c.button }]));
+/** Bindings (engine-specs) → what `play.setControls()` takes. */
+const toControls = (bindings) => ({
+  keys: Object.fromEntries(Object.entries(bindings).filter(([, b]) => b.code).map(([id, b]) => [id, b.code])),
+  buttons: Object.fromEntries(Object.entries(bindings).filter(([, b]) => Number.isInteger(b.button)).map(([id, b]) => [id, b.button])),
+});
 const asset = (path) => new URL(`./assets/${path}`, import.meta.url).href;
 
 /**
@@ -48,12 +114,12 @@ export const STAGES = {
 
 /** The pack's own menu scenes, looked up by name in the live stage list. */
 const PACK_SCREENS = [
-  { list: 0, match: 'LEVEL SELECT', label: 'Level select' },
-  { list: 1, match: 'STAGE MENU', label: 'Stage menu' },
+  { list: 0, match: 'LEVEL SELECT', key: 'levelSelect' },
+  { list: 1, match: 'STAGE MENU', key: 'stageMenu' },
 ];
 
 const PLAYER_ART = ['sonic', 'tails', 'knuckles', 'sonictails'];
-const PLAYER_NAMES = ['Sonic', 'Tails', 'Knuckles', 'Sonic y Tails'];
+const PLAYER_NAMES = ['Sonic', 'Tails', 'Knuckles', 'Sonic & Tails'];
 const GEMS = ['#58e058', '#f0a038', '#f078d8', '#9878f0', '#f0f0f0', '#f07878', '#78c0f8'];
 
 /** RSDKv4 stores how many emeralds, not which; an out-of-range value is counted by bits. */
@@ -97,6 +163,10 @@ const loadCss = () =>
 export async function mount(target, host) {
   await loadCss();
 
+  const locale = host.locale ?? resolveLocale();
+  const t = (key, params = {}) =>
+    (STRINGS[key]?.[locale] ?? STRINGS[key]?.en ?? key).replace(/\{(\w+)\}/g, (m, name) => (name in params ? String(params[name]) : m));
+
   const root = document.createElement('div');
   root.className = 'rsdk-app';
   root.style.setProperty('--accent', host.game?.accent ?? '#1d4ed8');
@@ -114,7 +184,7 @@ export async function mount(target, host) {
    */
   const state = {
     screen: 'boot',
-    status: 'Arrancando el motor…',
+    status: t('booting'),
     error: null,
     type: 0,
     players: [],
@@ -149,7 +219,7 @@ export async function mount(target, host) {
       const art = PLAYER_ART[state.pick[i]];
       return `<div class="slot-card is-new${focused}" data-focus="${i}">
         <button type="button" class="player-choose" data-player="${art}" data-pick="${i}" data-dir="1"
-                title="${esc(PLAYER_NAMES[state.pick[i]] ?? '')}">
+                title="${esc(state.pick[i] === 3 ? t('sonicAndTails') : (PLAYER_NAMES[state.pick[i]] ?? ''))}">
           <img src="${asset(`player-${art}.svg`)}" alt="">
         </button>
         <button type="button" class="slot-play" data-card="${i}">PLAY</button>
@@ -178,8 +248,10 @@ export async function mount(target, host) {
 
   const render = () => {
     if (destroyed) return;
-    root.dataset.screen = state.screen;
     const s = state.screen;
+    wake.setActive(s === 'game' && setting('keepScreenOn') !== false);
+    if (s === 'settings') return;
+    root.dataset.screen = state.screen;
     if (s === 'game') {
       overlay.innerHTML = '';
       return;
@@ -194,9 +266,9 @@ export async function mount(target, host) {
     if (s === 'error') {
       overlay.innerHTML = `<section class="rsdk-panel">
         <p class="kicker">${esc(host.game?.title ?? 'RSDKv4')}</p>
-        <h2>No se pudo arrancar</h2>
+        <h2>${esc(t('bootFailed'))}</h2>
         <p class="text">${esc(state.error)}</p>
-        <button class="item is-focused" data-exit>Volver</button>
+        <button class="item is-focused" data-exit>${esc(t('back'))}</button>
       </section>`;
       return;
     }
@@ -207,22 +279,22 @@ export async function mount(target, host) {
       const slot = selected > 0 ? state.slots[selected - 1] : null;
       const saved = slot && !slot.empty;
       html += `<section class="rsdk-slots">
-        <header><p class="kicker">${esc(host.game?.title ?? '')}</p><h2>Elige partida</h2></header>
+        <header><p class="kicker">${esc(host.game?.title ?? '')}</p><h2>${esc(t('chooseGame'))}</h2></header>
         <div class="slot-cards">${[0, 1, 2, 3, 4].map(slotCard).join('')}</div>
         ${hints([
-          ['←→', 'partida'],
-          ...(saved ? [] : [['↑↓', 'personaje']]),
-          ['A', saved ? 'continuar' : 'jugar'],
-          ...(saved ? [['Y', 'borrar']] : []),
-          ['B', state.playing ? 'volver' : 'salir'],
+          ['←→', t('game')],
+          ...(saved ? [] : [['↑↓', t('character')]]),
+          ['A', saved ? t('continueHint') : t('playHint')],
+          ...(saved ? [['Y', t('deleteHint')]] : []),
+          ['B', state.playing ? t('backHint') : t('quitHint')],
         ])}
       </section>`;
     } else if (base === 'pause') {
       html += `<section class="rsdk-panel">
         <p class="kicker">${esc(host.game?.title ?? '')}</p>
-        <h2>Pausa</h2>
+        <h2>${esc(t('paused'))}</h2>
         ${state.pause.items.map((item, i) => `<button class="item${i === state.pause.focus && s !== 'confirm' ? ' is-focused' : ''}" data-item="${i}">${esc(item.label)}${item.hint ? `<small>${esc(item.hint)}</small>` : ''}</button>`).join('')}
-        ${hints([['A', 'elegir'], ['B', 'continuar']])}
+        ${hints([['A', t('choose')], ['B', t('continueHint')]])}
       </section>`;
     }
     if (s === 'confirm') {
@@ -295,17 +367,23 @@ export async function mount(target, host) {
     state.pause = {
       focus: 0,
       items: [
-        { label: 'Continuar', run: closePause },
-        { label: 'Cambiar de partida', hint: 'vuelve a las partidas guardadas', run: () => showSlots('pause') },
+        { label: t('continue'), run: closePause },
+        { label: t('changeGame'), hint: t('changeGameHint'), run: () => showSlots('pause') },
         ...packScreens().map((screen) => ({
-          label: screen.label,
-          hint: 'pantalla del propio juego',
+          label: t(screen.key),
+          hint: t('packScreenHint'),
           run: () => {
             closePause();
             play.devMenu.loadStage(screen.list, screen.scene);
           },
         })),
-        { label: 'Volver al lanzador', run: askExit },
+        { label: t('settings'), run: openSettings },
+        {
+          label: t('fullscreen'),
+          hint: /mac|iphone|ipad/i.test(navigator.userAgentData?.platform || navigator.platform || '') ? t('fullscreenHintMac') : t('fullscreenHint'),
+          run: () => fullscreen.toggle(),
+        },
+        { label: t('exit'), run: askExit },
       ],
     };
     state.screen = 'pause';
@@ -349,14 +427,14 @@ export async function mount(target, host) {
   };
 
   const askExit = () =>
-    ask({ title: '¿Volver al lanzador?', text: 'La partida se guarda donde la guarde el juego.', yes: 'Salir', no: 'Seguir', onYes: exit });
+    ask({ title: t('leaveAsk'), text: t('leaveText'), yes: t('leave'), no: t('stay'), onYes: exit });
 
   const askDelete = (slot) =>
     ask({
-      title: `¿Borrar la partida ${slot + 1}?`,
-      text: 'No se puede deshacer.',
-      yes: 'Borrar',
-      no: 'Cancelar',
+      title: t('deleteAsk', { n: slot + 1 }),
+      text: t('noUndo'),
+      yes: t('delete'),
+      no: t('cancel'),
       onYes: () => {
         play.game.deleteSave(slot);
         refreshSlots();
@@ -368,6 +446,72 @@ export async function mount(target, host) {
     const count = Math.max(1, Math.min(PLAYER_ART.length, state.players.length || 1));
     state.pick[card] = (state.pick[card] + dir + count) % count;
     render();
+  };
+
+  // ---- settings, fullscreen, performance (engine-specs 0.6) -----------------------
+
+  // The player's choices, per engine (OPFS settings/<engine>.json): the engine's config
+  // (smoothing), the shared ones (keep the screen on, show performance) and the controls.
+  let saved = { version: 1, values: {}, controls: {} };
+  const setting = (key) => (key in saved.values ? saved.values[key] : SHARED_SETTINGS[key]?.default);
+  const store = () => saveSettings(ENGINE_ID, saved).catch((error) => console.warn(`[${ENGINE_ID} app] settings not saved`, error));
+  const engineValues = () =>
+    Object.fromEntries(Object.entries(saved.values).filter(([key]) => !(key in SHARED_SETTINGS)));
+
+  const fullscreen = createFullscreenToggle(root);
+  const wake = createWakeLock();
+  // The engine runs its own loop and reports no frames: the counter counts the display's.
+  const perf = createPerfCounter(root, { locale });
+  const applyShared = () => {
+    if (setting('showPerformance')) perf.show();
+    else perf.hide();
+    wake.setActive(state.screen === 'game' && setting('keepScreenOn') !== false);
+  };
+
+  let screen = null;
+  // Only the config's labelled rows are settings: the pack's GAME OPTIONS stay in the game.
+  const described = async () => ({ ...(await play.config()), ...SHARED_SETTINGS });
+  const controlRows = () => controlsModel(BUTTONS, DEFAULT_CONTROLS, saved.controls, locale);
+
+  const openSettings = async () => {
+    const all = await described();
+    state.screen = 'settings';
+    render();
+    overlay.innerHTML = '';
+    const layer = document.createElement('div');
+    layer.className = 'rsdk-confirm rsdk-settings';
+    overlay.append(layer);
+    screen = createSettingsScreen(layer, {
+      sections: settingsModel(all, saved.values, locale),
+      controls: controlRows(),
+      input: host.input,
+      locale,
+      onChange(key, value) {
+        saved.values = { ...saved.values, [key]: value };
+        if (key in SHARED_SETTINGS) applyShared();
+        else play.config({ [key]: value });
+        void store();
+      },
+      onControl(_id, _binding, bindings) {
+        saved.controls = bindings;
+        play.setControls(toControls(bindings));
+        void store();
+      },
+      onReset() {
+        const defaults = settingsDefaults(all);
+        saved = { version: 1, values: {}, controls: {} };
+        play.config(Object.fromEntries(Object.entries(defaults).filter(([key]) => !(key in SHARED_SETTINGS))));
+        play.setControls({});
+        applyShared();
+        void store();
+        screen.update(settingsModel(all, defaults, locale), controlRows());
+      },
+      onClose: () => {
+        screen?.destroy();
+        screen = null;
+        openPause();
+      },
+    });
   };
 
   // ---- input ----------------------------------------------------------------------
@@ -411,6 +555,7 @@ export async function mount(target, host) {
   const off = host.input.on((action) => {
     if (leaving) return;
     const s = state.screen;
+    if (s === 'settings') return;
     if (s === 'game') {
       if (action === 'menu') openPause();
     } else if (s === 'slots') onSlots(action);
@@ -472,6 +617,10 @@ export async function mount(target, host) {
         /* already gone */
       }
       play = null;
+      screen?.destroy();
+      fullscreen.destroy();
+      wake.destroy();
+      perf.destroy();
       root.remove();
     },
   };
@@ -481,11 +630,12 @@ export async function mount(target, host) {
   render();
   host.input.resume();
   try {
+    saved = await loadSettings(ENGINE_ID);
     play = await new Rsdkv4SDK()
       .mount(stage)
       .assets(host.assets)
       .storage(host.storage)
-      .config({ startMenu: 'host' })
+      .config({ startMenu: 'host', ...engineValues() })
       .on('saves', ({ detail }) => {
         refreshSlots(detail);
         if (state.screen === 'slots' || state.from === 'slots') render();
@@ -499,6 +649,8 @@ export async function mount(target, host) {
       play = null;
       return handle;
     }
+    play.setControls(toControls({ ...DEFAULT_CONTROLS, ...saved.controls }));
+    applyShared();
     state.type = play.game.type();
     try {
       state.players = play.game.players();
